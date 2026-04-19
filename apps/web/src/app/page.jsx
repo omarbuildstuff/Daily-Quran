@@ -49,224 +49,226 @@ export default function QuranProjectPage() {
   const [error, setError] = useState(null);
   const [mode, setMode] = useState("random"); // 'random' | 'surah'
   const [selectedSurah, setSelectedSurah] = useState(1);
+  const [surahTimerEnabled, setSurahTimerEnabled] = useState(false);
 
-  const audioARef = useRef(null);
-  const audioBRef = useRef(null);
-  const activeAudioRef = useRef(null); // direct pointer to whichever DOM element is playing
+  // Single audio element — plays the full surah as one file (no gap problem)
+  const audioRef = useRef(null);
+
+  // Current surah's data: full audio URL + per-verse timestamps + per-verse text/translation
+  // Shape: { surah: number, audioUrl: string, verses: [{ num, text, translation, startMs, endMs }] }
+  const surahDataRef = useRef(null);
+  // Prefetched next surah (for random mode when current finishes before timer ends)
+  const nextSurahDataRef = useRef(null);
+
   const timerRef = useRef(null);
-  const currentAyahKeyRef = useRef({ surah: 1, ayah: 1 });
-  const prefetchedRef = useRef(null);
-  const transitioningRef = useRef(false); // prevents double-firing during crossover
 
-  const getInactiveAudio = useCallback(() => {
-    if (activeAudioRef.current === audioARef.current) return audioBRef.current;
-    return audioARef.current;
-  }, []);
-
-  const getNextAyahKey = useCallback((surah, ayah) => {
-    const currentChapter = chapters.find((c) => c.id === surah);
-    let nextSurah = surah;
-    let nextAyah = ayah + 1;
-    if (nextAyah > currentChapter.verses_count) {
-      nextSurah = surah + 1;
-      nextAyah = 1;
-      if (nextSurah > 114) nextSurah = 1;
-    }
-    return { surah: nextSurah, ayah: nextAyah };
-  }, []);
-
-  const fetchAyahRaw = useCallback(
-    async (surah, ayah) => {
-      const ayahKey = `${surah}:${ayah}`;
-
-      const [verseResponse, translationResponse, audioResponse] =
-        await Promise.all([
-          fetch(
-            `https://api.quran.com/api/v4/verses/by_key/${ayahKey}?fields=text_uthmani`,
-          ),
-          fetch(
-            `https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/eng-mustafakhattaba/${surah}/${ayah}.json`,
-          ),
-          fetch(
-            `https://api.quran.com/api/v4/recitations/${reciterId}/by_ayah/${ayahKey}`,
-          ),
-        ]);
-
-      if (!verseResponse.ok) throw new Error(`Verse API error: ${verseResponse.status}`);
-      if (!audioResponse.ok) throw new Error(`Audio API error: ${audioResponse.status}`);
-
-      const [verseData, translationData, audioData] = await Promise.all([
-        verseResponse.json(),
-        translationResponse.ok ? translationResponse.json() : null,
-        audioResponse.json(),
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Fetch full surah: audio URL + verse timestamps + per-verse text + translations
+  // All in one bundled call. Returns { surah, audioUrl, surahName, verses: [{num, text, translation, startMs, endMs}] }
+  const fetchSurahData = useCallback(
+    async (surahId) => {
+      const [chapterAudioRes, versesRes, translationsRes] = await Promise.all([
+        fetch(
+          `https://api.quran.com/api/v4/chapter_recitations/${reciterId}/${surahId}?segments=true`,
+        ),
+        fetch(
+          `https://api.quran.com/api/v4/verses/by_chapter/${surahId}?fields=text_uthmani&per_page=300`,
+        ),
+        fetch(
+          `https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/eng-mustafakhattaba/${surahId}.json`,
+        ),
       ]);
 
-      if (!verseData.verse) throw new Error("Verse data not found");
-      if (!audioData.audio_files || audioData.audio_files.length === 0)
-        throw new Error("Audio not found for this reciter");
+      if (!chapterAudioRes.ok) throw new Error(`Audio API error: ${chapterAudioRes.status}`);
+      if (!versesRes.ok) throw new Error(`Verse API error: ${versesRes.status}`);
 
-      const translation =
-        translationData?.text
-          ? translationData.text
-          : "Translation not available";
+      const [chapterAudio, versesData, translationsData] = await Promise.all([
+        chapterAudioRes.json(),
+        versesRes.json(),
+        translationsRes.ok ? translationsRes.json() : null,
+      ]);
 
-      const audioUrl = audioData.audio_files[0].url;
+      if (!chapterAudio.audio_file) throw new Error("Chapter audio not found");
+
+      const timestamps = chapterAudio.audio_file.timestamps || [];
+      const translationByVerse = {};
+      if (translationsData?.chapter) {
+        translationsData.chapter.forEach((t) => {
+          translationByVerse[t.verse] = (t.text || "")
+            .replace(/<sup[^>]*>.*?<\/sup>/gi, "")
+            .replace(/<[^>]*>/g, "");
+        });
+      }
+
+      const verses = versesData.verses.map((v) => {
+        const ts = timestamps.find((t) => t.verse_key === v.verse_key);
+        return {
+          num: v.verse_number,
+          key: v.verse_key,
+          text: v.text_uthmani,
+          translation: translationByVerse[v.verse_number] || "Translation not available",
+          startMs: ts?.timestamp_from ?? 0,
+          endMs: ts?.timestamp_to ?? 0,
+        };
+      });
 
       return {
-        key: ayahKey,
-        text: verseData.verse.text_uthmani,
-        translation: translation
-          .replace(/<sup[^>]*>.*?<\/sup>/gi, "")
-          .replace(/<[^>]*>/g, ""),
-        audioUrl: audioUrl.startsWith("http")
-          ? audioUrl
-          : `https://verses.quran.com/${audioUrl}`,
+        surah: surahId,
+        audioUrl: chapterAudio.audio_file.audio_url,
         surahName:
-          chapters.find((c) => c.id === surah)?.name_simple ||
-          `Surah ${surah}`,
+          chapters.find((c) => c.id === surahId)?.name_simple || `Surah ${surahId}`,
+        verses,
       };
     },
     [reciterId],
   );
 
-  // Prefetch next verse data AND preload audio file into inactive element
-  const prefetchNext = useCallback(
-    (surah, ayah) => {
-      const next = getNextAyahKey(surah, ayah);
-      const promise = fetchAyahRaw(next.surah, next.ayah)
-        .then((data) => {
-          // Preload audio file into the inactive audio element
-          const preloadEl = getInactiveAudio();
-          if (preloadEl && data) {
-            preloadEl.src = data.audioUrl;
-            preloadEl.load();
-          }
-          return data;
-        })
-        .catch(() => null);
-      prefetchedRef.current = { key: next, promise };
-    },
-    [getNextAyahKey, fetchAyahRaw, getInactiveAudio],
-  );
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Active verse tracking — on timeupdate, find which verse is playing
+  // ─────────────────────────────────────────────────────────────────────────────
 
-  const playAyah = useCallback((data, targetElement) => {
-    setCurrentAyah(data);
-    setLoading(false);
-    const el = targetElement || activeAudioRef.current;
-    if (el) {
-      if (el.src !== data.audioUrl) {
-        el.src = data.audioUrl;
-      }
-      el.play().catch((e) => console.error("Playback error:", e));
-    }
+  const updateCurrentVerse = useCallback(() => {
+    const el = audioRef.current;
+    const sd = surahDataRef.current;
+    if (!el || !sd) return;
+    const currentMs = el.currentTime * 1000;
+    // Find the verse whose time range contains currentMs
+    const active =
+      sd.verses.find((v) => currentMs >= v.startMs && currentMs < v.endMs) ||
+      sd.verses[sd.verses.length - 1]; // fallback to last verse at end
+    if (!active) return;
+    // Update state only if it changed
+    setCurrentAyah((prev) => {
+      if (prev && prev.key === active.key) return prev;
+      return {
+        key: active.key,
+        text: active.text,
+        translation: active.translation,
+        surahName: sd.surahName,
+      };
+    });
   }, []);
 
-  const fetchAyahData = useCallback(
-    async (surah, ayah) => {
+  const handleTimeUpdate = useCallback(() => {
+    updateCurrentVerse();
+
+    // Timer-based end condition (random mode OR surah mode with optional timer enabled)
+    const timerActive = mode === "random" || (mode === "surah" && surahTimerEnabled);
+    if (timerActive) {
+      const now = Date.now();
+      const elapsed = (now - startTime) / 1000;
+      if (elapsed >= targetDuration) {
+        // Wait for end of current verse before stopping
+        const el = audioRef.current;
+        const sd = surahDataRef.current;
+        if (!el || !sd) return;
+        const currentMs = el.currentTime * 1000;
+        const active = sd.verses.find(
+          (v) => currentMs >= v.startMs && currentMs < v.endMs,
+        );
+        // If we're within ~200ms of the end of the current verse, stop now
+        if (active && active.endMs - currentMs <= 200) {
+          el.pause();
+          setView("finished");
+          setIsPlaying(false);
+        }
+      }
+    }
+  }, [updateCurrentVerse, mode, surahTimerEnabled, startTime, targetDuration]);
+
+  // Prefetch a random surah (for random mode when current surah ends before timer)
+  const prefetchRandomSurah = useCallback(async () => {
+    try {
+      const randomId = Math.floor(Math.random() * 114) + 1;
+      const data = await fetchSurahData(randomId);
+      nextSurahDataRef.current = data;
+    } catch (err) {
+      nextSurahDataRef.current = null;
+    }
+  }, [fetchSurahData]);
+
+  const loadAndPlaySurah = useCallback(
+    async (surahId, preloaded) => {
       setLoading(true);
       setError(null);
       try {
-        const data = await fetchAyahRaw(surah, ayah);
-        playAyah(data);
-        prefetchNext(surah, ayah);
+        const data = preloaded || (await fetchSurahData(surahId));
+        surahDataRef.current = data;
+
+        // Display the first verse immediately
+        if (data.verses.length > 0) {
+          const v0 = data.verses[0];
+          setCurrentAyah({
+            key: v0.key,
+            text: v0.text,
+            translation: v0.translation,
+            surahName: data.surahName,
+          });
+        }
+
+        const el = audioRef.current;
+        if (el) {
+          el.src = data.audioUrl;
+          el.load();
+          el.play().catch((e) => console.error("Playback error:", e));
+        }
+        setLoading(false);
+
+        // In random mode, prefetch the next surah so we can continue seamlessly
+        if (mode === "random") {
+          prefetchRandomSurah();
+        }
       } catch (err) {
-        console.error("Fetch error:", err);
+        console.error("Load surah error:", err);
         setError(err.message);
         setLoading(false);
       }
     },
-    [fetchAyahRaw, playAyah, prefetchNext],
+    [fetchSurahData, mode, prefetchRandomSurah],
   );
 
-  // Called either from timeupdate (early crossover) or onEnded (fallback)
-  const handleNextAyah = useCallback((fromTimeUpdate = false) => {
-    if (transitioningRef.current) return;
-    transitioningRef.current = true;
-
-    const { surah, ayah } = currentAyahKeyRef.current;
-
-    // In surah mode, stop at the end of the surah
+  // When the full surah audio naturally ends (via onEnded)
+  const handleSurahEnded = useCallback(() => {
     if (mode === "surah") {
-      const currentChapter = chapters.find((c) => c.id === surah);
-      if (ayah >= currentChapter.verses_count) {
-        transitioningRef.current = false;
-        setView("finished");
-        setIsPlaying(false);
-        return;
-      }
+      // Surah mode: session complete
+      setView("finished");
+      setIsPlaying(false);
+      return;
     }
-
-    const next = getNextAyahKey(surah, ayah);
-    currentAyahKeyRef.current = next;
-
-    // In random mode, stop after the target duration
-    if (mode === "random") {
-      const now = Date.now();
-      if ((now - startTime) / 1000 >= targetDuration) {
-        transitioningRef.current = false;
-        setView("finished");
-        setIsPlaying(false);
-        return;
-      }
+    // Random mode: if timer done, finish; else play another surah
+    const elapsed = (Date.now() - startTime) / 1000;
+    if (elapsed >= targetDuration) {
+      setView("finished");
+      setIsPlaying(false);
+      return;
     }
-
-    const pf = prefetchedRef.current;
-    if (pf && pf.key.surah === next.surah && pf.key.ayah === next.ayah) {
-      // If promise is already settled, Promise.resolve wraps it so .then fires synchronously
-      // in the microtask queue — still fast, but we avoid blocking
-      Promise.resolve(pf.promise).then((data) => {
-        transitioningRef.current = false;
-        if (data) {
-          const preloadedEl = getInactiveAudio();
-          // Silence the outgoing element immediately so there's no overlap bleed
-          const outgoing = activeAudioRef.current;
-          activeAudioRef.current = preloadedEl;
-          playAyah(data, preloadedEl);
-          // After playback starts on the new element, stop the old one cleanly
-          if (outgoing && outgoing !== preloadedEl) {
-            outgoing.pause();
-            outgoing.currentTime = 0;
-          }
-          prefetchNext(next.surah, next.ayah);
-        } else {
-          fetchAyahData(next.surah, next.ayah);
-        }
-      });
+    // Play the prefetched next surah, or fetch a new one
+    const preloaded = nextSurahDataRef.current;
+    nextSurahDataRef.current = null;
+    if (preloaded) {
+      loadAndPlaySurah(preloaded.surah, preloaded);
     } else {
-      transitioningRef.current = false;
-      fetchAyahData(next.surah, next.ayah);
+      const randomId = Math.floor(Math.random() * 114) + 1;
+      loadAndPlaySurah(randomId);
     }
-  }, [mode, startTime, targetDuration, getNextAyahKey, getInactiveAudio, playAyah, prefetchNext, fetchAyahData]);
+  }, [mode, startTime, targetDuration, loadAndPlaySurah]);
 
-  // timeupdate handler: fires ~4x/second, triggers crossover ~150ms before end.
-  // Both audio elements have this wired — guard so only the ACTIVE element triggers.
-  const handleTimeUpdate = useCallback((e) => {
-    const el = activeAudioRef.current;
-    if (!el || e.target !== el) return; // ignore events from the inactive (preloading) element
-    if (!el.duration || isNaN(el.duration)) return;
-    if (transitioningRef.current) return;
-    const remaining = el.duration - el.currentTime;
-    if (remaining <= 0.15 && remaining > 0) {
-      handleNextAyah(true);
-    }
-  }, [handleNextAyah]);
-
-  const startPlayback = () => {
-    const startSurah = mode === "surah" ? selectedSurah : Math.floor(Math.random() * 114) + 1;
-    const startAyah = 1;
-    currentAyahKeyRef.current = { surah: startSurah, ayah: startAyah };
-    prefetchedRef.current = null;
-    activeAudioRef.current = audioARef.current;
+  const startPlayback = useCallback(() => {
+    const startSurah =
+      mode === "surah" ? selectedSurah : Math.floor(Math.random() * 114) + 1;
+    surahDataRef.current = null;
+    nextSurahDataRef.current = null;
 
     setElapsedTime(0);
     setStartTime(Date.now());
     setView("playing");
     setIsPlaying(true);
-    fetchAyahData(startSurah, startAyah);
-  };
+    loadAndPlaySurah(startSurah);
+  }, [mode, selectedSurah, loadAndPlaySurah]);
 
+  // Pause/resume: toggle the audio element directly
   useEffect(() => {
-    const el = activeAudioRef.current;
+    const el = audioRef.current;
     if (el) {
       if (isPlaying) {
         el.play().catch((e) => console.error("Playback error:", e));
@@ -275,6 +277,28 @@ export default function QuranProjectPage() {
       }
     }
   }, [isPlaying]);
+
+  const handleEndSession = useCallback(() => {
+    setView("setup");
+    setIsPlaying(false);
+    const el = audioRef.current;
+    if (el) {
+      el.pause();
+      el.removeAttribute("src");
+      el.load();
+    }
+    surahDataRef.current = null;
+    nextSurahDataRef.current = null;
+    setCurrentAyah(null);
+  }, []);
+
+  const handleRepeat = useCallback(() => {
+    startPlayback();
+  }, [startPlayback]);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Elapsed time timer
+  // ─────────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (view === "playing" && isPlaying) {
@@ -287,17 +311,40 @@ export default function QuranProjectPage() {
     return () => clearInterval(timerRef.current);
   }, [view, isPlaying]);
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Cleanup on unmount
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    return () => {
+      clearInterval(timerRef.current);
+    };
+  }, []);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Helpers
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────────────
+
   return (
-    <div className="min-h-screen text-[#1a1a1a] font-inter selection:bg-black selection:text-white">
-      <audio ref={audioARef} onEnded={() => handleNextAyah(false)} onTimeUpdate={handleTimeUpdate} preload="auto" />
-      <audio ref={audioBRef} onEnded={() => handleNextAyah(false)} onTimeUpdate={handleTimeUpdate} preload="auto" />
-      <div className="max-w-screen-md mx-auto min-h-screen flex flex-col p-6 md:p-12">
+    <div className="app-shell text-[#1a1a1a] font-inter selection:bg-black selection:text-white">
+      <audio
+        ref={audioRef}
+        onEnded={handleSurahEnded}
+        onTimeUpdate={handleTimeUpdate}
+        preload="auto"
+      />
+
+      <div className="app-container max-w-screen-md mx-auto flex flex-col px-6 md:px-12 pt-6 md:pt-12 pb-20 md:pb-24">
         {/* Simple Header */}
         <header className="flex justify-between items-center mb-12 relative z-10">
           <div className="flex items-center gap-3">
@@ -317,19 +364,7 @@ export default function QuranProjectPage() {
           </div>
           {view !== "setup" && (
             <button
-              onClick={() => {
-                setView("setup");
-                setIsPlaying(false);
-                [audioARef, audioBRef].forEach((ref) => {
-                  if (ref.current) {
-                    ref.current.pause();
-                    ref.current.removeAttribute("src");
-                    ref.current.load();
-                  }
-                });
-                activeAudioRef.current = null;
-                prefetchedRef.current = null;
-              }}
+              onClick={handleEndSession}
               className="px-4 py-2 bg-white/50 backdrop-blur-md border border-[#e5e5e0] rounded-full text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition-all duration-300"
             >
               End Session
@@ -351,9 +386,10 @@ export default function QuranProjectPage() {
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: 40 }}
-                    className="h-1 bg-black"
+                    className="h-1"
+                    style={{ backgroundColor: "var(--accent-gold)" }}
                   />
-                  <h2 className="text-5xl md:text-7xl font-serif font-bold italic leading-[1.1] tracking-tighter">
+                  <h2 className="text-5xl md:text-7xl font-resolide font-bold leading-[1.1] tracking-tight">
                     {getGreeting().line1} <br />
                     {getGreeting().line2}
                   </h2>
@@ -375,7 +411,7 @@ export default function QuranProjectPage() {
                           : "text-[#999] hover:text-[#666]"
                       }`}
                     >
-                      Random Surah
+                      Randomize Surah
                     </button>
                     <button
                       onClick={() => setMode("surah")}
@@ -422,6 +458,97 @@ export default function QuranProjectPage() {
                             className="absolute right-4 top-1/2 -translate-y-1/2 text-[#999] rotate-90 pointer-events-none"
                           />
                         </div>
+
+                        {/* Optional timer toggle for surah mode */}
+                        <div className="pt-4">
+                          <button
+                            onClick={() => setSurahTimerEnabled(!surahTimerEnabled)}
+                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-[#999] hover:text-black transition-colors"
+                          >
+                            <span
+                              className={`w-8 h-5 rounded-full relative transition-colors ${
+                                surahTimerEnabled ? "bg-black" : "bg-[#e5e5e0]"
+                              }`}
+                            >
+                              <span
+                                className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${
+                                  surahTimerEnabled ? "left-[14px]" : "left-0.5"
+                                }`}
+                              />
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <Clock size={12} />
+                              Add timer (optional)
+                            </span>
+                          </button>
+                        </div>
+
+                        <AnimatePresence>
+                          {surahTimerEnabled && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.25, ease: "easeOut" }}
+                              className="overflow-hidden"
+                            >
+                              <div className="space-y-2 pt-4">
+                                <div className="flex gap-2">
+                                  {DURATIONS.map((d) => (
+                                    <button
+                                      key={d.value}
+                                      onClick={() => {
+                                        setTargetDuration(d.value);
+                                        setCustomMinutes("");
+                                      }}
+                                      className={`flex-1 py-4 rounded-2xl text-lg font-bold transition-all duration-300 border ${
+                                        targetDuration === d.value && !customMinutes
+                                          ? "bg-black text-white border-black shadow-2xl shadow-black/20"
+                                          : "bg-white text-[#666] border-[#e5e5e0] hover:border-black/20"
+                                      }`}
+                                    >
+                                      {d.label}
+                                    </button>
+                                  ))}
+                                </div>
+                                <div
+                                  className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition-all duration-300 ${
+                                    customMinutes
+                                      ? "bg-black border-black shadow-2xl shadow-black/20"
+                                      : "bg-white border-[#e5e5e0] hover:border-black/20"
+                                  }`}
+                                >
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="120"
+                                    placeholder="Custom duration"
+                                    value={customMinutes}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setCustomMinutes(val);
+                                      if (val && Number(val) > 0) {
+                                        setTargetDuration(Number(val) * 60);
+                                      }
+                                    }}
+                                    className={`flex-1 bg-transparent outline-none text-lg font-bold placeholder:font-normal ${
+                                      customMinutes
+                                        ? "text-white placeholder:text-white/40"
+                                        : "text-[#333] placeholder:text-[#aaa]"
+                                    }`}
+                                  />
+                                  <span
+                                    className={`text-sm font-bold uppercase tracking-widest ${
+                                      customMinutes ? "text-white/50" : "text-[#aaa]"
+                                    }`}
+                                  >
+                                    min
+                                  </span>
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </motion.div>
                     ) : (
                       <motion.div
@@ -572,12 +699,12 @@ export default function QuranProjectPage() {
                           className="space-y-8"
                         >
                           <div className="flex items-center justify-center gap-4">
-                            <div className="h-px w-8 bg-[#e5e5e0]" />
+                            <div className="h-px w-8" style={{ backgroundColor: "var(--accent-gold-soft)" }} />
                             <p className="text-[10px] font-mono uppercase tracking-[0.3em] text-[#999]">
                               Surah {currentAyah.surahName} • Verse{" "}
                               {currentAyah.key}
                             </p>
-                            <div className="h-px w-8 bg-[#e5e5e0]" />
+                            <div className="h-px w-8" style={{ backgroundColor: "var(--accent-gold-soft)" }} />
                           </div>
 
                           <h3
@@ -597,7 +724,10 @@ export default function QuranProjectPage() {
                   )
                 )}
 
-                <div className="fixed bottom-12 left-0 right-0 px-6 z-50">
+                {/* Gradient fade that masks scrolling content and Safari's
+                    semi-transparent bottom chrome from bleeding into the dock */}
+                <div className="playback-fade fixed left-0 right-0 bottom-0 z-40 pointer-events-none" />
+                <div className="playback-dock fixed left-0 right-0 px-6 z-50">
                   <div className="max-w-screen-sm mx-auto bg-white/90 backdrop-blur-2xl border border-[#e5e5e0] rounded-[2.5rem] p-8 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] flex items-center justify-between gap-6">
                     <div className="flex items-center gap-6">
                       <button
@@ -626,12 +756,12 @@ export default function QuranProjectPage() {
 
                     <div className="flex-1 max-w-[120px] text-right">
                       <p className="text-xl font-bold font-mono tracking-tighter">
-                        {mode === "surah" && currentAyah
+                        {mode === "surah" && !surahTimerEnabled && currentAyah
                           ? `${currentAyah.key.split(":")[1]}/${chapters.find((c) => c.id === selectedSurah)?.verses_count || "?"}`
                           : formatTime(targetDuration)}
                       </p>
                       <p className="text-[10px] uppercase tracking-widest text-[#999] font-bold">
-                        {mode === "surah" ? "Verse" : "Duration"}
+                        {mode === "surah" && !surahTimerEnabled ? "Verse" : "Duration"}
                       </p>
                     </div>
                   </div>
@@ -640,10 +770,13 @@ export default function QuranProjectPage() {
                   <div className="max-w-screen-sm mx-auto mt-4 px-8">
                     <div className="h-1 w-full bg-[#f0f0eb] rounded-full overflow-hidden">
                       <motion.div
-                        className="h-full bg-black rounded-full"
+                        className="h-full rounded-full"
+                        style={{
+                          background: "linear-gradient(90deg, var(--accent-gold) 0%, var(--accent-gold-deep) 100%)",
+                        }}
                         initial={{ width: 0 }}
                         animate={{
-                          width: `${Math.min(100, mode === "surah" && currentAyah
+                          width: `${Math.min(100, mode === "surah" && !surahTimerEnabled && currentAyah
                             ? ((Number(currentAyah.key.split(":")[1])) / (chapters.find((c) => c.id === selectedSurah)?.verses_count || 1)) * 100
                             : (elapsedTime / targetDuration) * 100)}%`,
                         }}
@@ -663,7 +796,14 @@ export default function QuranProjectPage() {
                 className="text-center space-y-12"
               >
                 <div className="relative inline-block">
-                  <div className="w-32 h-32 bg-black rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl shadow-black/20 rotate-12">
+                  <div
+                    className="w-32 h-32 rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl rotate-12"
+                    style={{
+                      background:
+                        "linear-gradient(135deg, var(--accent-gold-deep) 0%, var(--accent-gold) 100%)",
+                      boxShadow: "0 25px 50px -12px oklch(55% 0.12 65 / 0.35)",
+                    }}
+                  >
                     <Heart
                       size={56}
                       className="text-white"
@@ -671,9 +811,10 @@ export default function QuranProjectPage() {
                     />
                   </div>
                   <motion.div
-                    animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }}
+                    animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.7, 0.3] }}
                     transition={{ repeat: Infinity, duration: 2 }}
-                    className="absolute -inset-4 border border-black/10 rounded-[3rem]"
+                    className="absolute -inset-4 border rounded-[3rem]"
+                    style={{ borderColor: "var(--accent-gold-soft)" }}
                   />
                 </div>
 
@@ -683,7 +824,9 @@ export default function QuranProjectPage() {
                     Feekum.
                   </h2>
                   <p className="text-[#666] text-xl max-w-sm mx-auto font-light leading-relaxed">
-                    {mode === "surah"
+                    {mode === "surah" && surahTimerEnabled
+                      ? `${targetDuration / 60} minutes with Surah ${chapters.find((c) => c.id === selectedSurah)?.name_simple || ""}. May Allah bless your consistency.`
+                      : mode === "surah"
                       ? `Surah ${chapters.find((c) => c.id === selectedSurah)?.name_simple || ""}, beginning to end. May Allah bless your consistency.`
                       : `${targetDuration / 60} minutes with the words of Allah. May He bless your consistency.`}
                   </p>
@@ -697,7 +840,7 @@ export default function QuranProjectPage() {
                     New Session
                   </button>
                   <button
-                    onClick={startPlayback}
+                    onClick={handleRepeat}
                     className="text-[#666] py-4 text-sm font-bold uppercase tracking-widest hover:text-black transition-colors"
                   >
                     Repeat
@@ -717,7 +860,7 @@ export default function QuranProjectPage() {
               onClick={() => setError(null)}
               className="ml-2 hover:opacity-50"
             >
-              ×
+              x
             </button>
           </div>
         )}
@@ -725,11 +868,98 @@ export default function QuranProjectPage() {
 
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&family=Inter:wght@300;400;500;600;700&display=swap');
-        
+
+        @font-face {
+          font-family: 'Arsenica';
+          src: url('/arsenica-regular.ttf') format('truetype');
+          font-weight: 400;
+          font-style: normal;
+          font-display: swap;
+        }
+        @font-face {
+          font-family: 'Arsenica';
+          src: url('/arsenica-bold.ttf') format('truetype');
+          font-weight: 700;
+          font-style: normal;
+          font-display: swap;
+        }
+        @font-face {
+          font-family: 'Resolide Serif';
+          src: url('/resolide-serif.otf') format('opentype');
+          font-weight: normal;
+          font-style: normal;
+          font-display: swap;
+        }
+
+        .font-resolide {
+          font-family: 'Arsenica', 'Resolide Serif', 'Playfair Display', serif;
+        }
+
+        :root {
+          /* Warm amber/ochre — aged manuscript illumination gold */
+          --accent-gold: oklch(72% 0.11 75);
+          --accent-gold-soft: oklch(86% 0.06 75);
+          --accent-gold-deep: oklch(55% 0.12 65);
+          /* Muted sage — traditional Islamic heritage green */
+          --accent-sage: oklch(50% 0.06 155);
+          --accent-sage-soft: oklch(90% 0.02 150);
+          /* Warm tinted neutrals */
+          --surface-warm: oklch(97% 0.008 80);
+          --border-warm: oklch(88% 0.015 75);
+        }
+
+        /* Lock html and body from scrolling so iOS rubber-band overscroll
+           never exposes them. All scrolling happens inside .app-shell instead. */
+        html, body {
+          height: 100%;
+          overflow: hidden;
+          background-color: oklch(97% 0.008 80);
+          overscroll-behavior: none;
+        }
+
         body {
-          background-color: #fafaf5;
           color: #1a1a1a;
           -webkit-font-smoothing: antialiased;
+        }
+
+        /* App shell is now the scroll container. Overscroll is contained
+           within it, so any bounce stays inside the styled area. */
+        .app-shell {
+          position: fixed;
+          inset: 0;
+          overflow-y: auto;
+          overscroll-behavior-y: contain;
+          scroll-behavior: smooth;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        .app-container {
+          min-height: 100%;
+        }
+
+        /* Playback dock — sits above iOS home indicator via safe-area inset. */
+        .playback-dock {
+          bottom: calc(3rem + env(safe-area-inset-bottom, 0px));
+        }
+
+        /* Gradient fade behind the dock.
+           Extends to the very bottom edge of the viewport (under Safari's
+           translucent bottom toolbar) so scrolling content and dock shadows
+           don't bleed awkwardly against the browser chrome. */
+        .playback-fade {
+          height: calc(12rem + env(safe-area-inset-bottom, 0px));
+          background: linear-gradient(
+            to bottom,
+            oklch(97% 0.008 80 / 0) 0%,
+            oklch(97% 0.008 80 / 0.7) 40%,
+            oklch(97% 0.008 80 / 1) 70%,
+            oklch(97% 0.008 80 / 1) 100%
+          );
+        }
+
+        ::selection {
+          background-color: var(--accent-gold-soft);
+          color: var(--accent-gold-deep);
         }
 
         .font-serif {
@@ -768,9 +998,52 @@ export default function QuranProjectPage() {
           }
         }
 
-        /* Hide scrollbar but keep functionality */
+        /* Custom scrollbar — slim black thumb with a single gold hair down the center */
+        * {
+          scrollbar-width: thin;
+          scrollbar-color: #1a1a1a transparent;
+        }
         ::-webkit-scrollbar {
-          display: none;
+          width: 8px;
+          height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+          /* Black capsule with a thin amber hairline running down its middle.
+             Large transparent top/bottom border makes the visible thumb shorter. */
+          background:
+            linear-gradient(
+              90deg,
+              #1a1a1a 0%,
+              #1a1a1a 45%,
+              var(--accent-gold) 45%,
+              var(--accent-gold) 55%,
+              #1a1a1a 55%,
+              #1a1a1a 100%
+            );
+          border-radius: 999px;
+          border: 2px solid transparent;
+          background-clip: padding-box;
+          transition: all 0.2s ease;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+          background:
+            linear-gradient(
+              90deg,
+              #000 0%,
+              #000 40%,
+              var(--accent-gold) 40%,
+              var(--accent-gold) 60%,
+              #000 60%,
+              #000 100%
+            );
+          background-clip: padding-box;
+          box-shadow: 0 0 6px oklch(55% 0.12 65 / 0.3);
+        }
+        ::-webkit-scrollbar-corner {
+          background: transparent;
         }
       `}</style>
     </div>
