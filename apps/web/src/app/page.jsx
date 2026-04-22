@@ -83,10 +83,36 @@ const getGreeting = () => {
   return { line1: "Wind down.", line2: "Listen before you sleep." };
 };
 
+// localStorage-backed state — reads the stored value on first render (client only),
+// falls back to the default on the server / when storage is empty or corrupt.
+const STORAGE_PREFIX = "quranaday.v1.";
+const usePersistentState = (key, defaultValue) => {
+  const storageKey = STORAGE_PREFIX + key;
+  const [value, setValue] = useState(() => {
+    if (typeof window === "undefined") return defaultValue;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw === null) return defaultValue;
+      return JSON.parse(raw);
+    } catch {
+      return defaultValue;
+    }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(value));
+    } catch {
+      // Ignore quota / privacy-mode errors
+    }
+  }, [storageKey, value]);
+  return [value, setValue];
+};
+
 export default function QuranProjectPage() {
   const [view, setView] = useState("setup"); // 'setup' | 'playing' | 'finished'
-  const [reciterId, setReciterId] = useState(7);
-  const [targetDuration, setTargetDuration] = useState(300);
+  const [reciterId, setReciterId] = usePersistentState("reciterId", 7);
+  const [targetDuration, setTargetDuration] = usePersistentState("targetDuration", 300);
   const [currentAyah, setCurrentAyah] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -94,15 +120,15 @@ export default function QuranProjectPage() {
   const [loading, setLoading] = useState(false);
   const [customMinutes, setCustomMinutes] = useState("");
   const [error, setError] = useState(null);
-  const [mode, setMode] = useState("random"); // 'random' | 'surah'
-  const [selectedSurah, setSelectedSurah] = useState(1);
-  const [selectedMood, setSelectedMood] = useState("fear");
-  const [moodEnabled, setMoodEnabled] = useState(false);
-  const [surahTimerEnabled, setSurahTimerEnabled] = useState(false);
+  const [mode, setMode] = usePersistentState("mode", "random"); // 'random' | 'surah'
+  const [selectedSurah, setSelectedSurah] = usePersistentState("selectedSurah", 1);
+  const [selectedMood, setSelectedMood] = usePersistentState("selectedMood", "fear");
+  const [moodEnabled, setMoodEnabled] = usePersistentState("moodEnabled", false);
+  const [surahTimerEnabled, setSurahTimerEnabled] = usePersistentState("surahTimerEnabled", false);
   const [showSettings, setShowSettings] = useState(false);
-  const [autoStopTimer, setAutoStopTimer] = useState(true);
-  const [languageMode, setLanguageMode] = useState("both"); // 'arabic' | 'english' | 'both'
-  const [autoFocus, setAutoFocus] = useState("arabic"); // 'arabic' | 'english' — only applies when languageMode === 'both'
+  const [autoStopTimer, setAutoStopTimer] = usePersistentState("autoStopTimer", true);
+  const [languageMode, setLanguageMode] = usePersistentState("languageMode", "both"); // 'arabic' | 'english' | 'both'
+  const [autoFocus, setAutoFocus] = usePersistentState("autoFocus", "arabic"); // 'arabic' | 'english' — only applies when languageMode === 'both'
 
   // Single audio element — plays the full surah as one file (no gap problem)
   const audioRef = useRef(null);
@@ -865,11 +891,12 @@ export default function QuranProjectPage() {
                       <AnimatePresence mode="wait">
                         <motion.div
                           key={currentAyah.key}
-                          initial={{ opacity: 0, y: 20, filter: "blur(6px)" }}
-                          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                          exit={{ opacity: 0, y: -20, filter: "blur(6px)" }}
-                          transition={{ duration: 0.35, ease: "easeOut" }}
+                          initial={{ opacity: 0, y: 16 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -16 }}
+                          transition={{ duration: 0.3, ease: "easeOut" }}
                           onAnimationComplete={handleVerseEntered}
+                          style={{ willChange: "transform, opacity" }}
                           className="space-y-8"
                         >
                           <div className="flex items-center justify-center gap-4">
@@ -944,21 +971,22 @@ export default function QuranProjectPage() {
                     </div>
                   </div>
 
-                  {/* Progress Bar under the capsule */}
+                  {/* Progress Bar under the capsule — plain div + CSS transform for
+                      cheap 60fps animation. Scaling is GPU-composited, unlike width. */}
                   <div className="max-w-screen-sm mx-auto mt-4 px-8">
                     <div className="h-1 w-full bg-[#f0f0eb] rounded-full overflow-hidden">
-                      <motion.div
-                        className="h-full rounded-full"
+                      <div
+                        className="h-full rounded-full origin-left"
                         style={{
                           background: "linear-gradient(90deg, var(--accent-gold) 0%, var(--accent-gold-deep) 100%)",
+                          transform: `scaleX(${Math.min(1, mode === "surah" && !surahTimerEnabled && currentAyah
+                            ? (Number(currentAyah.key.split(":")[1])) / (chapters.find((c) => c.id === selectedSurah)?.verses_count || 1)
+                            : elapsedTime / targetDuration)})`,
+                          transformOrigin: "left center",
+                          transition: "transform 1s linear",
+                          willChange: "transform",
+                          width: "100%",
                         }}
-                        initial={{ width: 0 }}
-                        animate={{
-                          width: `${Math.min(100, mode === "surah" && !surahTimerEnabled && currentAyah
-                            ? ((Number(currentAyah.key.split(":")[1])) / (chapters.find((c) => c.id === selectedSurah)?.verses_count || 1)) * 100
-                            : (elapsedTime / targetDuration) * 100)}%`,
-                        }}
-                        transition={{ duration: 1 }}
                       />
                     </div>
                   </div>
