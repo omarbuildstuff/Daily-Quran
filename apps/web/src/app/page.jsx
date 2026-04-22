@@ -402,19 +402,22 @@ export default function QuranProjectPage() {
   }, [view, isPlaying]);
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Auto-scroll to the focused language when a new verse arrives
+  // Auto-scroll to the focused language after a new verse has finished entering.
+  // Wired to Framer Motion's onAnimationComplete — before that the next motion.div
+  // hasn't mounted yet (AnimatePresence mode="wait"), so the refs would be stale.
   // ─────────────────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (view !== "playing" || !currentAyah || languageMode !== "both") return;
-    // Give Framer Motion's enter animation a beat before scrolling
-    const id = setTimeout(() => {
+  const handleVerseEntered = useCallback(
+    (definition) => {
+      // Only react to the enter animation, not the exit
+      if (!definition || definition.opacity !== 1) return;
+      if (languageMode !== "both") return;
       const target = autoFocus === "english" ? englishRef.current : arabicRef.current;
       if (target) {
         target.scrollIntoView({ behavior: "smooth", block: "center" });
       }
-    }, 80);
-    return () => clearTimeout(id);
-  }, [currentAyah?.key, languageMode, autoFocus, view]);
+    },
+    [languageMode, autoFocus],
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Cleanup on unmount
@@ -866,6 +869,7 @@ export default function QuranProjectPage() {
                           animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                           exit={{ opacity: 0, y: -20, filter: "blur(6px)" }}
                           transition={{ duration: 0.35, ease: "easeOut" }}
+                          onAnimationComplete={handleVerseEntered}
                           className="space-y-8"
                         >
                           <div className="flex items-center justify-center gap-4">
