@@ -1,16 +1,51 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import {
-  Play,
-  Pause,
-  Heart,
-  Globe,
-  Clock,
-  ChevronRight,
-} from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { chapters } from "../data/chapters";
+
+// Bootstrap Icons — inline SVG paths, kept tiny so we don't pull in the full library.
+const BI_PATHS = {
+  "play-fill":
+    "m11.596 8.697-6.363 3.692c-.54.313-1.233-.066-1.233-.697V4.308c0-.63.692-1.01 1.233-.696l6.363 3.692a.802.802 0 0 1 0 1.393",
+  "pause-fill":
+    "M5.5 3.5A1.5 1.5 0 0 1 7 5v6a1.5 1.5 0 0 1-3 0V5a1.5 1.5 0 0 1 1.5-1.5m5 0A1.5 1.5 0 0 1 12 5v6a1.5 1.5 0 0 1-3 0V5a1.5 1.5 0 0 1 1.5-1.5",
+  "heart-fill":
+    "M8 1.314C12.438-3.248 23.534 4.735 8 15-7.534 4.736 3.562-3.248 8 1.314",
+  globe:
+    "M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8m7.5-6.923c-.67.204-1.335.82-1.887 1.855A8 8 0 0 0 5.145 4H7.5zM4.09 4a9.3 9.3 0 0 1 .64-1.539 7 7 0 0 1 .597-.933A7.03 7.03 0 0 0 2.255 4zm-.582 3.5c.03-.877.138-1.718.312-2.5H1.674a7 7 0 0 0-.656 2.5zM4.847 5a12.5 12.5 0 0 0-.338 2.5H7.5V5zM8.5 5v2.5h2.99a12.5 12.5 0 0 0-.337-2.5zM4.51 8.5a12.5 12.5 0 0 0 .337 2.5H7.5V8.5zm3.99 0V11h2.653c.187-.765.306-1.608.338-2.5zM5.145 12q.208.58.468 1.068c.552 1.035 1.218 1.65 1.887 1.855V12zm.182 2.472a7 7 0 0 1-.597-.933A9.3 9.3 0 0 1 4.09 12H2.255a7 7 0 0 0 3.072 2.472M3.82 11a13.7 13.7 0 0 1-.312-2.5h-2.49c.062.89.291 1.733.656 2.5zm6.853 3.472A7 7 0 0 0 13.745 12H11.91a9.3 9.3 0 0 1-.64 1.539 7 7 0 0 1-.597.933M8.5 12v2.923c.67-.204 1.335-.82 1.887-1.855q.26-.487.468-1.068zm3.68-1h2.146c.365-.767.594-1.61.656-2.5h-2.49a13.7 13.7 0 0 1-.312 2.5m2.802-3.5a7 7 0 0 0-.656-2.5H12.18c.174.782.282 1.623.312 2.5zM11.27 2.461c.247.464.462.98.64 1.539h1.835a7 7 0 0 0-3.072-2.472c.218.284.418.598.597.933M10.855 4a8 8 0 0 0-.468-1.068C9.835 1.897 9.17 1.282 8.5 1.077V4z",
+  clock:
+    "M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71z|M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0",
+  "chevron-right":
+    "M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708",
+  "x-lg":
+    "M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8z",
+  "gear-wide":
+    "M8.932.727c-.243-.97-1.62-.97-1.864 0l-.071.286a.96.96 0 0 1-1.622.434l-.205-.211c-.695-.719-1.888-.03-1.613.931l.08.284a.96.96 0 0 1-1.186 1.187l-.284-.081c-.96-.275-1.65.918-.931 1.613l.211.205a.96.96 0 0 1-.434 1.622l-.286.071c-.97.243-.97 1.62 0 1.864l.286.071a.96.96 0 0 1 .434 1.622l-.211.205c-.719.695-.03 1.888.931 1.613l.284-.08a.96.96 0 0 1 1.187 1.187l-.081.283c-.275.96.918 1.65 1.613.931l.205-.211a.96.96 0 0 1 1.622.434l.071.286c.243.97 1.62.97 1.864 0l.071-.286a.96.96 0 0 1 1.622-.434l.205.211c.695.719 1.888.03 1.613-.931l-.08-.284a.96.96 0 0 1 1.187-1.187l.283.081c.96.275 1.65-.918.931-1.613l-.211-.205a.96.96 0 0 1 .434-1.622l.286-.071c.97-.243.97-1.62 0-1.864l-.286-.071a.96.96 0 0 1-.434-1.622l.211-.205c.719-.695.03-1.888-.931-1.613l-.284.08a.96.96 0 0 1-1.187-1.186l.081-.284c.275-.96-.918-1.65-1.613-.931l-.205.211a.96.96 0 0 1-1.622-.434zM8 12.997a4.998 4.998 0 1 1 0-9.995 4.998 4.998 0 0 1 0 9.996z",
+  hearts:
+    "M4.931.481c1.627-1.671 5.692 1.254 0 5.015-5.692-3.76-1.626-6.686 0-5.015m6.84 1.794c1.084-1.114 3.795.836 0 3.343-3.795-2.507-1.084-4.457 0-3.343M7.84 7.642c2.71-2.786 9.486 2.09 0 8.358-9.487-6.268-2.71-11.144 0-8.358",
+};
+
+const Bi = ({ name, size = 16, className = "", ...rest }) => {
+  const path = BI_PATHS[name];
+  if (!path) return null;
+  const paths = path.split("|");
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      fill="currentColor"
+      viewBox="0 0 16 16"
+      className={className}
+      {...rest}
+    >
+      {paths.map((d, i) => (
+        <path key={i} fillRule="evenodd" d={d} />
+      ))}
+    </svg>
+  );
+};
 
 const RECITERS = [
   { id: 7, name: "Mishari Rashid al-Afasy" },
@@ -25,6 +60,18 @@ const DURATIONS = [
   { label: "5 min", value: 5 * 60 },
   { label: "10 min", value: 10 * 60 },
   { label: "15 min", value: 15 * 60 },
+];
+
+// Curated surah recommendations per mood/intention
+const MOODS = [
+  { id: "fear", label: "Fear of Allah", emoji: "🕊️", surahs: [59, 101, 81, 82, 99] },
+  { id: "patience", label: "Patience", emoji: "⌛", surahs: [12, 103, 94, 2] },
+  { id: "gratitude", label: "Gratitude", emoji: "🌿", surahs: [55, 14, 93, 108] },
+  { id: "afterlife", label: "Afterlife", emoji: "🌅", surahs: [75, 56, 69, 77, 101] },
+  { id: "repentance", label: "Repentance", emoji: "💧", surahs: [66, 25, 110, 71] },
+  { id: "hope", label: "Hope", emoji: "✨", surahs: [39, 36, 93, 94] },
+  { id: "tawakkul", label: "Tawakkul", emoji: "🤲", surahs: [65, 8, 67, 1] },
+  { id: "dunya", label: "Loving this Dunya", emoji: "🌍", surahs: [57, 102, 104, 75] },
 ];
 
 const getGreeting = () => {
@@ -49,7 +96,13 @@ export default function QuranProjectPage() {
   const [error, setError] = useState(null);
   const [mode, setMode] = useState("random"); // 'random' | 'surah'
   const [selectedSurah, setSelectedSurah] = useState(1);
+  const [selectedMood, setSelectedMood] = useState("fear");
+  const [moodEnabled, setMoodEnabled] = useState(false);
   const [surahTimerEnabled, setSurahTimerEnabled] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [autoStopTimer, setAutoStopTimer] = useState(true);
+  const [languageMode, setLanguageMode] = useState("both"); // 'arabic' | 'english' | 'both'
+  const [autoFocus, setAutoFocus] = useState("arabic"); // 'arabic' | 'english' — only applies when languageMode === 'both'
 
   // Single audio element — plays the full surah as one file (no gap problem)
   const audioRef = useRef(null);
@@ -59,6 +112,12 @@ export default function QuranProjectPage() {
   const surahDataRef = useRef(null);
   // Prefetched next surah (for random mode when current finishes before timer ends)
   const nextSurahDataRef = useRef(null);
+  // Surahs already played in the current random session — avoids repeats within a mood pool
+  const playedSurahsRef = useRef([]);
+
+  // Refs to each verse's language block — used by the auto-focus scroll effect
+  const arabicRef = useRef(null);
+  const englishRef = useRef(null);
 
   const timerRef = useRef(null);
 
@@ -153,7 +212,9 @@ export default function QuranProjectPage() {
     updateCurrentVerse();
 
     // Timer-based end condition (random mode OR surah mode with optional timer enabled)
-    const timerActive = mode === "random" || (mode === "surah" && surahTimerEnabled);
+    // Skipped entirely when user turns auto-stop off — audio keeps going until surah ends.
+    const timerActive =
+      autoStopTimer && (mode === "random" || (mode === "surah" && surahTimerEnabled));
     if (timerActive) {
       const now = Date.now();
       const elapsed = (now - startTime) / 1000;
@@ -174,18 +235,40 @@ export default function QuranProjectPage() {
         }
       }
     }
-  }, [updateCurrentVerse, mode, surahTimerEnabled, startTime, targetDuration]);
+  }, [updateCurrentVerse, mode, surahTimerEnabled, autoStopTimer, startTime, targetDuration]);
 
-  // Prefetch a random surah (for random mode when current surah ends before timer)
+  // Pick the next random surah, respecting the active mood pool and avoiding
+  // repeats within the current session. Reshuffles automatically once the pool
+  // is exhausted.
+  const pickNextRandomSurah = useCallback(() => {
+    let pool;
+    if (moodEnabled) {
+      const mood = MOODS.find((m) => m.id === selectedMood);
+      pool = mood?.surahs && mood.surahs.length > 0 ? mood.surahs : [1];
+    } else {
+      pool = Array.from({ length: 114 }, (_, i) => i + 1);
+    }
+    const unplayed = pool.filter((id) => !playedSurahsRef.current.includes(id));
+    const source = unplayed.length > 0 ? unplayed : pool;
+    if (unplayed.length === 0) {
+      // Pool fully cycled — reset so we can shuffle again
+      playedSurahsRef.current = [];
+    }
+    const picked = source[Math.floor(Math.random() * source.length)];
+    playedSurahsRef.current = [...playedSurahsRef.current, picked];
+    return picked;
+  }, [moodEnabled, selectedMood]);
+
+  // Prefetch next surah (for random mode when current surah ends before timer)
   const prefetchRandomSurah = useCallback(async () => {
     try {
-      const randomId = Math.floor(Math.random() * 114) + 1;
-      const data = await fetchSurahData(randomId);
+      const nextId = pickNextRandomSurah();
+      const data = await fetchSurahData(nextId);
       nextSurahDataRef.current = data;
     } catch (err) {
       nextSurahDataRef.current = null;
     }
-  }, [fetchSurahData]);
+  }, [fetchSurahData, pickNextRandomSurah]);
 
   const loadAndPlaySurah = useCallback(
     async (surahId, preloaded) => {
@@ -248,23 +331,30 @@ export default function QuranProjectPage() {
     if (preloaded) {
       loadAndPlaySurah(preloaded.surah, preloaded);
     } else {
-      const randomId = Math.floor(Math.random() * 114) + 1;
-      loadAndPlaySurah(randomId);
+      const nextId = pickNextRandomSurah();
+      loadAndPlaySurah(nextId);
     }
-  }, [mode, startTime, targetDuration, loadAndPlaySurah]);
+  }, [mode, startTime, targetDuration, loadAndPlaySurah, pickNextRandomSurah]);
 
   const startPlayback = useCallback(() => {
-    const startSurah =
-      mode === "surah" ? selectedSurah : Math.floor(Math.random() * 114) + 1;
+    // Reset session state — critical for random mode so mood pool picks fresh
     surahDataRef.current = null;
     nextSurahDataRef.current = null;
+    playedSurahsRef.current = [];
+
+    let startSurah;
+    if (mode === "surah") {
+      startSurah = selectedSurah;
+    } else {
+      startSurah = pickNextRandomSurah();
+    }
 
     setElapsedTime(0);
     setStartTime(Date.now());
     setView("playing");
     setIsPlaying(true);
     loadAndPlaySurah(startSurah);
-  }, [mode, selectedSurah, loadAndPlaySurah]);
+  }, [mode, selectedSurah, pickNextRandomSurah, loadAndPlaySurah]);
 
   // Pause/resume: toggle the audio element directly
   useEffect(() => {
@@ -310,6 +400,21 @@ export default function QuranProjectPage() {
     }
     return () => clearInterval(timerRef.current);
   }, [view, isPlaying]);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Auto-scroll to the focused language when a new verse arrives
+  // ─────────────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (view !== "playing" || !currentAyah || languageMode !== "both") return;
+    // Give Framer Motion's enter animation a beat before scrolling
+    const id = setTimeout(() => {
+      const target = autoFocus === "english" ? englishRef.current : arabicRef.current;
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 80);
+    return () => clearTimeout(id);
+  }, [currentAyah?.key, languageMode, autoFocus, view]);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Cleanup on unmount
@@ -362,14 +467,25 @@ export default function QuranProjectPage() {
               </p>
             </div>
           </div>
-          {view !== "setup" && (
-            <button
-              onClick={handleEndSession}
-              className="px-4 py-2 bg-white/50 backdrop-blur-md border border-[#e5e5e0] rounded-full text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition-all duration-300"
-            >
-              End Session
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {view !== "setup" && (
+              <button
+                onClick={handleEndSession}
+                className="px-4 py-2 bg-white/50 backdrop-blur-md border border-[#e5e5e0] rounded-full text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition-all duration-300"
+              >
+                End Session
+              </button>
+            )}
+            {view === "setup" && (
+              <button
+                onClick={() => setShowSettings(true)}
+                aria-label="Settings"
+                className="w-10 h-10 bg-white/50 backdrop-blur-md border border-[#e5e5e0] rounded-full flex items-center justify-center text-[#666] hover:bg-black hover:text-white hover:border-black transition-all duration-300"
+              >
+                <Bi name="gear-wide" size={16} />
+              </button>
+            )}
+          </div>
         </header>
 
         <main className="flex-1 flex flex-col justify-center relative">
@@ -436,7 +552,7 @@ export default function QuranProjectPage() {
                         className="space-y-4"
                       >
                         <div className="flex items-center gap-2 text-[#999]">
-                          <ChevronRight size={14} />
+                          <Bi name="chevron-right" size={14} />
                           <label className="text-xs font-mono uppercase tracking-widest">
                             Which surah?
                           </label>
@@ -453,7 +569,8 @@ export default function QuranProjectPage() {
                               </option>
                             ))}
                           </select>
-                          <ChevronRight
+                          <Bi
+                            name="chevron-right"
                             size={18}
                             className="absolute right-4 top-1/2 -translate-y-1/2 text-[#999] rotate-90 pointer-events-none"
                           />
@@ -477,7 +594,7 @@ export default function QuranProjectPage() {
                               />
                             </span>
                             <span className="flex items-center gap-2">
-                              <Clock size={12} />
+                              <Bi name="clock" size={12} />
                               Add timer (optional)
                             </span>
                           </button>
@@ -560,7 +677,7 @@ export default function QuranProjectPage() {
                         className="space-y-4"
                       >
                         <div className="flex items-center gap-2 text-[#999]">
-                          <Clock size={14} />
+                          <Bi name="clock" size={14} />
                           <label className="text-xs font-mono uppercase tracking-widest">
                             How long?
                           </label>
@@ -617,13 +734,66 @@ export default function QuranProjectPage() {
                             min
                           </span>
                         </div>
+
+                        {/* Optional mood toggle (random mode only) */}
+                        <div className="pt-4">
+                          <button
+                            onClick={() => setMoodEnabled(!moodEnabled)}
+                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-[#999] hover:text-black transition-colors"
+                          >
+                            <span
+                              className={`w-8 h-5 rounded-full relative transition-colors ${
+                                moodEnabled ? "bg-black" : "bg-[#e5e5e0]"
+                              }`}
+                            >
+                              <span
+                                className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${
+                                  moodEnabled ? "left-[14px]" : "left-0.5"
+                                }`}
+                              />
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <Bi name="hearts" size={12} />
+                              Feeling a certain way?
+                            </span>
+                          </button>
+                        </div>
+
+                        <AnimatePresence>
+                          {moodEnabled && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.25, ease: "easeOut" }}
+                              className="overflow-hidden"
+                            >
+                              <div className="grid grid-cols-2 gap-2 pt-4">
+                                {MOODS.map((m) => (
+                                  <button
+                                    key={m.id}
+                                    onClick={() => setSelectedMood(m.id)}
+                                    className={`flex items-center gap-2 py-3 px-4 rounded-2xl text-sm font-bold transition-all duration-300 border text-left ${
+                                      selectedMood === m.id
+                                        ? "bg-black text-white border-black shadow-2xl shadow-black/20"
+                                        : "bg-white text-[#666] border-[#e5e5e0] hover:border-black/20"
+                                    }`}
+                                  >
+                                    <span className="text-base">{m.emoji}</span>
+                                    <span className="truncate">{m.label}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </motion.div>
                     )}
                   </AnimatePresence>
 
                   <div className="space-y-4">
                     <div className="flex items-center gap-2 text-[#999]">
-                      <Globe size={14} />
+                      <Bi name="globe" size={14} />
                       <label className="text-xs font-mono uppercase tracking-widest">
                         Who recites?
                       </label>
@@ -641,7 +811,7 @@ export default function QuranProjectPage() {
                         ))}
                       </select>
                       <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none text-[#999]">
-                        <ChevronRight size={20} className="rotate-90" />
+                        <Bi name="chevron-right" size={20} className="rotate-90" />
                       </div>
                     </div>
                   </div>
@@ -652,9 +822,9 @@ export default function QuranProjectPage() {
                   className="w-full bg-black text-white rounded-[2rem] py-8 text-2xl font-bold shadow-2xl shadow-black/30 hover:shadow-black/40 hover:-translate-y-1 active:translate-y-0 transition-all flex items-center justify-center gap-4 group"
                 >
                   Start Listening
-                  <Play
+                  <Bi
+                    name="play-fill"
                     size={24}
-                    fill="currentColor"
                     className="group-hover:scale-110 transition-transform"
                   />
                 </button>
@@ -707,16 +877,24 @@ export default function QuranProjectPage() {
                             <div className="h-px w-8" style={{ backgroundColor: "var(--accent-gold-soft)" }} />
                           </div>
 
-                          <h3
-                            className="text-5xl md:text-7xl font-serif leading-[1.4] md:leading-[1.4] text-center"
-                            dir="rtl"
-                          >
-                            {currentAyah.text}
-                          </h3>
+                          {languageMode !== "english" && (
+                            <h3
+                              ref={arabicRef}
+                              className="text-5xl md:text-[5rem] font-serif leading-[1.4] md:leading-[1.4] text-center scroll-mt-32"
+                              dir="rtl"
+                            >
+                              {currentAyah.text}
+                            </h3>
+                          )}
 
-                          <p className="text-xl md:text-3xl text-[#666] leading-relaxed italic max-w-2xl mx-auto font-light">
-                            {currentAyah.translation}
-                          </p>
+                          {languageMode !== "arabic" && (
+                            <p
+                              ref={englishRef}
+                              className="text-xl md:text-3xl text-[#666] leading-relaxed italic max-w-2xl mx-auto font-light scroll-mt-32"
+                            >
+                              {currentAyah.translation}
+                            </p>
+                          )}
                         </motion.div>
                       </AnimatePresence>
 
@@ -735,13 +913,9 @@ export default function QuranProjectPage() {
                         className="w-16 h-16 bg-black rounded-[1.5rem] flex items-center justify-center text-white shadow-xl shadow-black/20 hover:scale-105 active:scale-95 transition-all"
                       >
                         {isPlaying ? (
-                          <Pause size={28} fill="currentColor" />
+                          <Bi name="pause-fill" size={28} />
                         ) : (
-                          <Play
-                            size={28}
-                            className="ml-1"
-                            fill="currentColor"
-                          />
+                          <Bi name="play-fill" size={28} className="ml-1" />
                         )}
                       </button>
                       <div>
@@ -804,11 +978,7 @@ export default function QuranProjectPage() {
                       boxShadow: "0 25px 50px -12px oklch(55% 0.12 65 / 0.35)",
                     }}
                   >
-                    <Heart
-                      size={56}
-                      className="text-white"
-                      fill="currentColor"
-                    />
+                    <Bi name="heart-fill" size={56} className="text-white" />
                   </div>
                   <motion.div
                     animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.7, 0.3] }}
@@ -864,6 +1034,145 @@ export default function QuranProjectPage() {
             </button>
           </div>
         )}
+
+        {/* Settings modal */}
+        <AnimatePresence>
+          {showSettings && (
+            <motion.div
+              key="settings-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setShowSettings(false)}
+              className="fixed inset-0 z-[90] bg-black/30 backdrop-blur-sm flex items-center justify-center p-6"
+            >
+              <motion.div
+                initial={{ opacity: 0, y: 20, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 20, scale: 0.96 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-md bg-white border border-[#e5e5e0] rounded-[2rem] p-8 shadow-2xl"
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-2xl font-bold font-resolide tracking-tight">
+                    Settings
+                  </h3>
+                  <button
+                    onClick={() => setShowSettings(false)}
+                    aria-label="Close settings"
+                    className="w-9 h-9 rounded-full border border-[#e5e5e0] flex items-center justify-center text-[#666] hover:bg-black hover:text-white hover:border-black transition-all"
+                  >
+                    <Bi name="x-lg" size={14} />
+                  </button>
+                </div>
+
+                <div className="space-y-5">
+                  {/* Auto-stop on timer end */}
+                  <button
+                    onClick={() => setAutoStopTimer(!autoStopTimer)}
+                    className="w-full flex items-start justify-between gap-4 py-3 text-left"
+                  >
+                    <div className="flex-1">
+                      <p className="text-base font-bold text-[#1a1a1a]">
+                        Auto-stop on timer end
+                      </p>
+                      <p className="text-sm text-[#999] leading-snug mt-1">
+                        Stop playback when the timer runs out. Off lets the surah finish.
+                      </p>
+                    </div>
+                    <span
+                      className={`shrink-0 mt-1 w-11 h-6 rounded-full relative transition-colors ${
+                        autoStopTimer ? "bg-black" : "bg-[#e5e5e0]"
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${
+                          autoStopTimer ? "left-[22px]" : "left-0.5"
+                        }`}
+                      />
+                    </span>
+                  </button>
+
+                  <div className="h-px bg-[#f0f0eb]" />
+
+                  {/* Language display */}
+                  <div className="py-3 space-y-3">
+                    <div>
+                      <p className="text-base font-bold text-[#1a1a1a]">
+                        Language display
+                      </p>
+                      <p className="text-sm text-[#999] leading-snug mt-1">
+                        What to show while you listen.
+                      </p>
+                    </div>
+                    <div className="flex gap-1 bg-[#f0f0ec] rounded-xl p-1">
+                      {[
+                        { id: "arabic", label: "Arabic" },
+                        { id: "english", label: "English" },
+                        { id: "both", label: "Both" },
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          onClick={() => setLanguageMode(opt.id)}
+                          className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+                            languageMode === opt.id
+                              ? "bg-white text-black shadow-sm"
+                              : "text-[#999] hover:text-[#666]"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <AnimatePresence>
+                    {languageMode === "both" && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.25, ease: "easeOut" }}
+                        className="overflow-hidden"
+                      >
+                        <div className="py-3 space-y-3">
+                          <div>
+                            <p className="text-base font-bold text-[#1a1a1a]">
+                              Focus on new verse
+                            </p>
+                            <p className="text-sm text-[#999] leading-snug mt-1">
+                              Which language gets emphasized when a verse arrives.
+                            </p>
+                          </div>
+                          <div className="flex gap-1 bg-[#f0f0ec] rounded-xl p-1">
+                            {[
+                              { id: "arabic", label: "Arabic" },
+                              { id: "english", label: "English" },
+                            ].map((opt) => (
+                              <button
+                                key={opt.id}
+                                onClick={() => setAutoFocus(opt.id)}
+                                className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+                                  autoFocus === opt.id
+                                    ? "bg-white text-black shadow-sm"
+                                    : "text-[#999] hover:text-[#666]"
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <style jsx global>{`
