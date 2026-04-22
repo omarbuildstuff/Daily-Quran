@@ -394,6 +394,54 @@ export default function QuranProjectPage() {
     }
   }, [isPlaying]);
 
+  // Screen wake lock — keep the device awake while audio is playing so the
+  // phone doesn't sleep mid-recitation. Browsers release the lock automatically
+  // when the tab is hidden; we re-acquire it on visibilitychange.
+  const wakeLockRef = useRef(null);
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("wakeLock" in navigator)) return;
+    let cancelled = false;
+
+    const acquire = async () => {
+      try {
+        const lock = await navigator.wakeLock.request("screen");
+        if (cancelled) {
+          lock.release().catch(() => {});
+          return;
+        }
+        wakeLockRef.current = lock;
+        lock.addEventListener("release", () => {
+          if (wakeLockRef.current === lock) wakeLockRef.current = null;
+        });
+      } catch {
+        // User denied, tab hidden, or platform quirk — nothing actionable
+      }
+    };
+
+    const release = () => {
+      const lock = wakeLockRef.current;
+      wakeLockRef.current = null;
+      if (lock) lock.release().catch(() => {});
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && isPlaying && view === "playing") {
+        acquire();
+      }
+    };
+
+    if (view === "playing" && isPlaying) {
+      acquire();
+      document.addEventListener("visibilitychange", handleVisibility);
+    }
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", handleVisibility);
+      release();
+    };
+  }, [isPlaying, view]);
+
   const handleEndSession = useCallback(() => {
     setView("setup");
     setIsPlaying(false);
