@@ -529,10 +529,14 @@ export default function QuranProjectPage() {
               >
                 <div className="space-y-6">
                   <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: 40 }}
-                    className="h-1"
-                    style={{ backgroundColor: "var(--accent-gold)" }}
+                    initial={{ scaleX: 0 }}
+                    animate={{ scaleX: 1 }}
+                    transition={{ duration: 0.4, ease: "easeOut" }}
+                    className="h-1 w-10 origin-left"
+                    style={{
+                      backgroundColor: "var(--accent-gold)",
+                      willChange: "transform",
+                    }}
                   />
                   <h2 className="text-5xl md:text-7xl font-resolide font-bold leading-[1.1] tracking-tight">
                     {getGreeting().line1} <br />
@@ -617,9 +621,12 @@ export default function QuranProjectPage() {
                               }`}
                             >
                               <span
-                                className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${
-                                  surahTimerEnabled ? "left-[14px]" : "left-0.5"
-                                }`}
+                                className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
+                                style={{
+                                  transform: surahTimerEnabled ? "translateX(13px)" : "translateX(0)",
+                                  transition: "transform 180ms ease-out",
+                                  willChange: "transform",
+                                }}
                               />
                             </span>
                             <span className="flex items-center gap-2">
@@ -776,9 +783,12 @@ export default function QuranProjectPage() {
                               }`}
                             >
                               <span
-                                className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${
-                                  moodEnabled ? "left-[14px]" : "left-0.5"
-                                }`}
+                                className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
+                                style={{
+                                  transform: moodEnabled ? "translateX(13px)" : "translateX(0)",
+                                  transition: "transform 180ms ease-out",
+                                  willChange: "transform",
+                                }}
                               />
                             </span>
                             <span className="flex items-center gap-2">
@@ -1120,9 +1130,12 @@ export default function QuranProjectPage() {
                       }`}
                     >
                       <span
-                        className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${
-                          autoStopTimer ? "left-[22px]" : "left-0.5"
-                        }`}
+                        className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm"
+                        style={{
+                          transform: autoStopTimer ? "translateX(20px)" : "translateX(0)",
+                          transition: "transform 180ms ease-out",
+                          willChange: "transform",
+                        }}
                       />
                     </span>
                   </button>
