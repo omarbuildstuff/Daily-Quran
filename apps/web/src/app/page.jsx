@@ -756,7 +756,7 @@ export default function QuranProjectPage() {
                             </span>
                             <span className="flex items-center gap-2">
                               <Bi name="clock" size={12} />
-                              Add timer (optional)
+                              Add timer
                             </span>
                           </button>
                         </div>
