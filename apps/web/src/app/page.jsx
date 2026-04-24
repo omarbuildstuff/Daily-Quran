@@ -125,6 +125,10 @@ export default function QuranProjectPage() {
   const [selectedMood, setSelectedMood] = usePersistentState("selectedMood", "fear");
   const [moodEnabled, setMoodEnabled] = usePersistentState("moodEnabled", false);
   const [surahTimerEnabled, setSurahTimerEnabled] = usePersistentState("surahTimerEnabled", false);
+  const [memorizationEnabled, setMemorizationEnabled] = usePersistentState("memorizationEnabled", false);
+  const [memStartVerse, setMemStartVerse] = usePersistentState("memStartVerse", 1);
+  const [memEndVerse, setMemEndVerse] = usePersistentState("memEndVerse", 1);
+  const [memRepeat, setMemRepeat] = usePersistentState("memRepeat", false);
   const [showSettings, setShowSettings] = useState(false);
   const [autoStopTimer, setAutoStopTimer] = usePersistentState("autoStopTimer", true);
   const [languageMode, setLanguageMode] = usePersistentState("languageMode", "both"); // 'arabic' | 'english' | 'both'
@@ -237,6 +241,28 @@ export default function QuranProjectPage() {
   const handleTimeUpdate = useCallback(() => {
     updateCurrentVerse();
 
+    // Memorization mode — loop or stop at end of selected verse range.
+    // Takes priority over the duration timer.
+    if (mode === "surah" && memorizationEnabled) {
+      const el = audioRef.current;
+      const sd = surahDataRef.current;
+      if (!el || !sd) return;
+      const startV = sd.verses.find((v) => v.num === Number(memStartVerse));
+      const endV = sd.verses.find((v) => v.num === Number(memEndVerse));
+      if (!startV || !endV) return;
+      const currentMs = el.currentTime * 1000;
+      if (currentMs >= endV.endMs - 60) {
+        if (memRepeat) {
+          el.currentTime = startV.startMs / 1000;
+        } else {
+          el.pause();
+          setView("finished");
+          setIsPlaying(false);
+        }
+      }
+      return; // skip duration-timer logic when memorizing
+    }
+
     // Timer-based end condition (random mode OR surah mode with optional timer enabled)
     // Skipped entirely when user turns auto-stop off — audio keeps going until surah ends.
     const timerActive =
@@ -261,7 +287,18 @@ export default function QuranProjectPage() {
         }
       }
     }
-  }, [updateCurrentVerse, mode, surahTimerEnabled, autoStopTimer, startTime, targetDuration]);
+  }, [
+    updateCurrentVerse,
+    mode,
+    surahTimerEnabled,
+    autoStopTimer,
+    startTime,
+    targetDuration,
+    memorizationEnabled,
+    memStartVerse,
+    memEndVerse,
+    memRepeat,
+  ]);
 
   // Pick the next random surah, respecting the active mood pool and avoiding
   // repeats within the current session. Reshuffles automatically once the pool
@@ -304,13 +341,18 @@ export default function QuranProjectPage() {
         const data = preloaded || (await fetchSurahData(surahId));
         surahDataRef.current = data;
 
-        // Display the first verse immediately
-        if (data.verses.length > 0) {
-          const v0 = data.verses[0];
+        // For memorization, the listener wants to start at a specific verse —
+        // pick that one instead of verse 1 for the immediate display.
+        const initialVerse =
+          mode === "surah" && memorizationEnabled
+            ? data.verses.find((v) => v.num === Number(memStartVerse)) || data.verses[0]
+            : data.verses[0];
+
+        if (initialVerse) {
           setCurrentAyah({
-            key: v0.key,
-            text: v0.text,
-            translation: v0.translation,
+            key: initialVerse.key,
+            text: initialVerse.text,
+            translation: initialVerse.translation,
             surahName: data.surahName,
           });
         }
@@ -319,7 +361,22 @@ export default function QuranProjectPage() {
         if (el) {
           el.src = data.audioUrl;
           el.load();
-          el.play().catch((e) => console.error("Playback error:", e));
+          const seekIfNeeded = () => {
+            if (mode === "surah" && memorizationEnabled && initialVerse) {
+              el.currentTime = initialVerse.startMs / 1000;
+            }
+          };
+          // Seek before play so the start position is in place when playback begins.
+          // If metadata isn't ready, defer until it is.
+          const startPlay = () => {
+            seekIfNeeded();
+            el.play().catch((e) => console.error("Playback error:", e));
+          };
+          if (el.readyState >= 1) {
+            startPlay();
+          } else {
+            el.addEventListener("loadedmetadata", startPlay, { once: true });
+          }
         }
         setLoading(false);
 
@@ -333,12 +390,23 @@ export default function QuranProjectPage() {
         setLoading(false);
       }
     },
-    [fetchSurahData, mode, prefetchRandomSurah],
+    [fetchSurahData, mode, prefetchRandomSurah, memorizationEnabled, memStartVerse],
   );
 
   // When the full surah audio naturally ends (via onEnded)
   const handleSurahEnded = useCallback(() => {
     if (mode === "surah") {
+      // Memorization with repeat — loop back to the start verse instead of finishing
+      if (memorizationEnabled && memRepeat) {
+        const sd = surahDataRef.current;
+        const el = audioRef.current;
+        const startV = sd?.verses.find((v) => v.num === Number(memStartVerse));
+        if (sd && el && startV) {
+          el.currentTime = startV.startMs / 1000;
+          el.play().catch((e) => console.error("Playback error:", e));
+          return;
+        }
+      }
       // Surah mode: session complete
       setView("finished");
       setIsPlaying(false);
@@ -360,7 +428,16 @@ export default function QuranProjectPage() {
       const nextId = pickNextRandomSurah();
       loadAndPlaySurah(nextId);
     }
-  }, [mode, startTime, targetDuration, loadAndPlaySurah, pickNextRandomSurah]);
+  }, [
+    mode,
+    startTime,
+    targetDuration,
+    loadAndPlaySurah,
+    pickNextRandomSurah,
+    memorizationEnabled,
+    memRepeat,
+    memStartVerse,
+  ]);
 
   const startPlayback = useCallback(() => {
     // Reset session state — critical for random mode so mood pool picks fresh
@@ -749,6 +826,112 @@ export default function QuranProjectPage() {
                               </div>
                             </motion.div>
                           )}
+                        </AnimatePresence>
+
+                        {/* Memorization toggle */}
+                        <div className="pt-2">
+                          <button
+                            onClick={() => setMemorizationEnabled(!memorizationEnabled)}
+                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-[#999] hover:text-black transition-colors"
+                          >
+                            <span
+                              className={`w-8 h-5 rounded-full relative transition-colors ${
+                                memorizationEnabled ? "bg-black" : "bg-[#e5e5e0]"
+                              }`}
+                            >
+                              <span
+                                className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
+                                style={{
+                                  transform: memorizationEnabled ? "translateX(13px)" : "translateX(0)",
+                                  transition: "transform 180ms ease-out",
+                                  willChange: "transform",
+                                }}
+                              />
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <Bi name="hearts" size={12} />
+                              Memorization mode
+                            </span>
+                          </button>
+                        </div>
+
+                        <AnimatePresence>
+                          {memorizationEnabled && (() => {
+                            const versesCount =
+                              chapters.find((c) => c.id === selectedSurah)?.verses_count || 1;
+                            const clamp = (n) => Math.min(Math.max(1, Number(n) || 1), versesCount);
+                            return (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={{ duration: 0.25, ease: "easeOut" }}
+                                className="overflow-hidden"
+                              >
+                                <div className="space-y-3 pt-4">
+                                  <div className="flex gap-2">
+                                    <div className="flex-1 bg-white border border-[#e5e5e0] rounded-2xl px-5 py-4">
+                                      <p className="text-[10px] font-mono uppercase tracking-widest text-[#999] mb-1">
+                                        Start verse
+                                      </p>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        max={versesCount}
+                                        value={memStartVerse}
+                                        onChange={(e) => {
+                                          const v = clamp(e.target.value);
+                                          setMemStartVerse(v);
+                                          if (v > Number(memEndVerse)) setMemEndVerse(v);
+                                        }}
+                                        className="w-full bg-transparent outline-none text-lg font-bold text-[#333]"
+                                      />
+                                    </div>
+                                    <div className="flex-1 bg-white border border-[#e5e5e0] rounded-2xl px-5 py-4">
+                                      <p className="text-[10px] font-mono uppercase tracking-widest text-[#999] mb-1">
+                                        End verse
+                                      </p>
+                                      <input
+                                        type="number"
+                                        min={memStartVerse}
+                                        max={versesCount}
+                                        value={memEndVerse}
+                                        onChange={(e) => {
+                                          const v = clamp(e.target.value);
+                                          setMemEndVerse(Math.max(v, Number(memStartVerse)));
+                                        }}
+                                        className="w-full bg-transparent outline-none text-lg font-bold text-[#333]"
+                                      />
+                                    </div>
+                                  </div>
+                                  <p className="text-[11px] text-[#999] leading-snug">
+                                    {versesCount} verses in this surah. Range loops or stops based on the toggle below.
+                                  </p>
+
+                                  <button
+                                    onClick={() => setMemRepeat(!memRepeat)}
+                                    className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-[#999] hover:text-black transition-colors pt-1"
+                                  >
+                                    <span
+                                      className={`w-8 h-5 rounded-full relative transition-colors ${
+                                        memRepeat ? "bg-black" : "bg-[#e5e5e0]"
+                                      }`}
+                                    >
+                                      <span
+                                        className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
+                                        style={{
+                                          transform: memRepeat ? "translateX(13px)" : "translateX(0)",
+                                          transition: "transform 180ms ease-out",
+                                          willChange: "transform",
+                                        }}
+                                      />
+                                    </span>
+                                    <span>Play on repeat</span>
+                                  </button>
+                                </div>
+                              </motion.div>
+                            );
+                          })()}
                         </AnimatePresence>
                       </motion.div>
                     ) : (
