@@ -1152,7 +1152,7 @@ export default function QuranProjectPage() {
                           {languageMode !== "english" && (
                             <h3
                               ref={arabicRef}
-                              className="text-5xl md:text-[5rem] font-serif leading-[1.4] md:leading-[1.4] text-center scroll-mt-32"
+                              className="text-4xl md:text-6xl font-serif leading-[1.4] md:leading-[1.4] text-center scroll-mt-32"
                               dir="rtl"
                             >
                               {currentAyah.text}
