@@ -1089,12 +1089,12 @@ export default function QuranProjectPage() {
 
                 <button
                   onClick={startPlayback}
-                  className="w-full bg-black text-white rounded-[2rem] py-8 text-2xl font-bold shadow-2xl shadow-black/30 hover:shadow-black/40 hover:-translate-y-1 active:translate-y-0 transition-all flex items-center justify-center gap-4 group"
+                  className="w-full bg-black text-white rounded-[1.75rem] py-6 text-xl font-bold shadow-xl shadow-black/30 hover:shadow-black/40 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-3 group"
                 >
                   Start Listening
                   <Bi
                     name="play-fill"
-                    size={24}
+                    size={22}
                     className="group-hover:scale-110 transition-transform"
                   />
                 </button>
@@ -1178,20 +1178,20 @@ export default function QuranProjectPage() {
                     semi-transparent bottom chrome from bleeding into the dock */}
                 <div className="playback-fade fixed left-0 right-0 bottom-0 z-40 pointer-events-none" />
                 <div className="playback-dock fixed left-0 right-0 px-6 z-50">
-                  <div className="max-w-screen-sm mx-auto bg-white/90 backdrop-blur-2xl border border-[#e5e5e0] rounded-[2.5rem] p-8 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] flex items-center justify-between gap-6">
-                    <div className="flex items-center gap-6">
+                  <div className="max-w-screen-sm mx-auto bg-white/90 backdrop-blur-2xl border border-[#e5e5e0] rounded-[2.25rem] px-6 py-5 shadow-[0_28px_56px_-16px_rgba(0,0,0,0.1)] flex items-center justify-between gap-5">
+                    <div className="flex items-center gap-5">
                       <button
                         onClick={() => setIsPlaying(!isPlaying)}
-                        className="w-16 h-16 bg-black rounded-[1.5rem] flex items-center justify-center text-white shadow-xl shadow-black/20 hover:scale-105 active:scale-95 transition-all"
+                        className="w-14 h-14 bg-black rounded-[1.3rem] flex items-center justify-center text-white shadow-lg shadow-black/20 hover:scale-105 active:scale-95 transition-all"
                       >
                         {isPlaying ? (
-                          <Bi name="pause-fill" size={28} />
+                          <Bi name="pause-fill" size={24} />
                         ) : (
-                          <Bi name="play-fill" size={28} className="ml-1" />
+                          <Bi name="play-fill" size={24} className="ml-0.5" />
                         )}
                       </button>
                       <div>
-                        <p className="text-xl font-bold font-mono tracking-tighter">
+                        <p className="text-lg font-bold font-mono tracking-tighter">
                           {formatTime(elapsedTime)}
                         </p>
                         <p className="text-[10px] uppercase tracking-widest text-[#999] font-bold">
@@ -1201,7 +1201,7 @@ export default function QuranProjectPage() {
                     </div>
 
                     <div className="flex-1 max-w-[120px] text-right">
-                      <p className="text-xl font-bold font-mono tracking-tighter">
+                      <p className="text-lg font-bold font-mono tracking-tighter">
                         {mode === "surah" && !surahTimerEnabled && currentAyah
                           ? `${currentAyah.key.split(":")[1]}/${chapters.find((c) => c.id === selectedSurah)?.verses_count || "?"}`
                           : formatTime(targetDuration)}
