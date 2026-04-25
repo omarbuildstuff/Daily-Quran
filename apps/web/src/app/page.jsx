@@ -134,14 +134,6 @@ export default function QuranProjectPage() {
   const [languageMode, setLanguageMode] = usePersistentState("languageMode", "both"); // 'arabic' | 'english' | 'both'
   const [autoFocus, setAutoFocus] = usePersistentState("autoFocus", "arabic"); // 'arabic' | 'english' — only applies when languageMode === 'both'
 
-  // Splash overlay on first paint — gives the app a branded moment of presence
-  // before revealing the setup view. Hidden once `appReady` flips on mount.
-  const [appReady, setAppReady] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setAppReady(true), 3300);
-    return () => clearTimeout(t);
-  }, []);
-
   // Single audio element — plays the full surah as one file (no gap problem)
   const audioRef = useRef(null);
 
@@ -249,9 +241,27 @@ export default function QuranProjectPage() {
   const handleTimeUpdate = useCallback(() => {
     updateCurrentVerse();
 
-    // Memorization loop is owned by the rAF effect above (60Hz precision).
-    // Skip duration-timer logic when in memorization mode.
-    if (mode === "surah" && memorizationEnabled) return;
+    // Memorization mode — loop or stop at end of selected verse range.
+    // Takes priority over the duration timer.
+    if (mode === "surah" && memorizationEnabled) {
+      const el = audioRef.current;
+      const sd = surahDataRef.current;
+      if (!el || !sd) return;
+      const startV = sd.verses.find((v) => v.num === Number(memStartVerse));
+      const endV = sd.verses.find((v) => v.num === Number(memEndVerse));
+      if (!startV || !endV) return;
+      const currentMs = el.currentTime * 1000;
+      if (currentMs >= endV.endMs - 60) {
+        if (memRepeat) {
+          el.currentTime = startV.startMs / 1000;
+        } else {
+          el.pause();
+          setView("finished");
+          setIsPlaying(false);
+        }
+      }
+      return; // skip duration-timer logic when memorizing
+    }
 
     // Timer-based end condition (random mode OR surah mode with optional timer enabled)
     // Skipped entirely when user turns auto-stop off — audio keeps going until surah ends.
@@ -285,6 +295,9 @@ export default function QuranProjectPage() {
     startTime,
     targetDuration,
     memorizationEnabled,
+    memStartVerse,
+    memEndVerse,
+    memRepeat,
   ]);
 
   // Pick the next random surah, respecting the active mood pool and avoiding
@@ -506,42 +519,6 @@ export default function QuranProjectPage() {
     };
   }, [isPlaying, view]);
 
-  // High-precision memorization loop boundary — `timeupdate` only fires ~4Hz,
-  // so by the time it tells us we've crossed endMs, the next verse may already
-  // be a quarter-second into our ears. requestAnimationFrame ticks at 60Hz and
-  // catches the boundary tightly. Only runs while a memorization session is
-  // actively playing.
-  useEffect(() => {
-    if (!(view === "playing" && isPlaying && mode === "surah" && memorizationEnabled)) {
-      return;
-    }
-    let raf = 0;
-    const tick = () => {
-      const el = audioRef.current;
-      const sd = surahDataRef.current;
-      if (el && sd && !el.paused) {
-        const startV = sd.verses.find((v) => v.num === Number(memStartVerse));
-        const endV = sd.verses.find((v) => v.num === Number(memEndVerse));
-        if (startV && endV) {
-          const currentMs = el.currentTime * 1000;
-          if (currentMs >= endV.endMs) {
-            if (memRepeat) {
-              el.currentTime = startV.startMs / 1000;
-            } else {
-              el.pause();
-              setView("finished");
-              setIsPlaying(false);
-              return;
-            }
-          }
-        }
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [view, isPlaying, mode, memorizationEnabled, memStartVerse, memEndVerse, memRepeat]);
-
   const handleEndSession = useCallback(() => {
     setView("setup");
     setIsPlaying(false);
@@ -619,91 +596,6 @@ export default function QuranProjectPage() {
 
   return (
     <div className="app-shell text-[#1a1a1a] font-inter selection:bg-black selection:text-white">
-      {/* Splash overlay — first impression. Sits above everything until the app
-          is ready, then fades out gracefully. The setup view underneath is
-          already rendered (SSR), so the transition reveals a fully laid-out app. */}
-      <AnimatePresence>
-        {!appReady && (
-          <motion.div
-            key="splash"
-            initial={{ opacity: 1 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.55, ease: "easeOut" }}
-            className="splash-overlay flex flex-col items-center justify-center"
-            style={{
-              position: "fixed",
-              inset: 0,
-              zIndex: 200,
-              backgroundColor: "oklch(97% 0.008 80)",
-            }}
-            aria-hidden="true"
-          >
-          {/* Logo fades in first */}
-          <motion.img
-            src="/quran-hub-logo.png"
-            alt=""
-            className="h-20 w-auto mb-6"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, ease: "easeOut" }}
-            style={{ willChange: "transform, opacity" }}
-          />
-
-          {/* "Quran Hub" — manuscript-style char-by-char reveal. Each
-              character fades in with a slide-up + tiny clip-path wipe so the
-              wordmark feels written by an unseen pen. Uses the existing
-              Arsenica / Resolide serif so the brand stays consistent. */}
-          <h1
-            className="font-resolide font-bold tracking-tight text-5xl md:text-6xl flex"
-            style={{ willChange: "transform" }}
-          >
-            {"Quran Hub".split("").map((ch, i) => (
-              <motion.span
-                key={i}
-                initial={{ opacity: 0, y: 14, clipPath: "inset(0 100% 0 0)" }}
-                animate={{ opacity: 1, y: 0, clipPath: "inset(0 0% 0 0)" }}
-                transition={{
-                  delay: 0.3 + i * 0.16,
-                  duration: 0.55,
-                  ease: [0.2, 0.65, 0.3, 1],
-                }}
-                style={{
-                  display: "inline-block",
-                  whiteSpace: "pre",
-                  willChange: "transform, opacity",
-                }}
-              >
-                {ch}
-              </motion.span>
-            ))}
-          </h1>
-
-          {/* Gold underline draws after the wordmark settles */}
-          <motion.div
-            initial={{ scaleX: 0 }}
-            animate={{ scaleX: 1 }}
-            transition={{ delay: 2.0, duration: 0.5, ease: "easeOut" }}
-            className="h-[2px] w-16 origin-left mt-6"
-            style={{
-              backgroundColor: "var(--accent-gold)",
-              willChange: "transform",
-            }}
-          />
-
-          {/* Tagline fades in last */}
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 2.4, duration: 0.4, ease: "easeOut" }}
-            className="text-[10px] font-mono uppercase tracking-[0.3em] text-[#999] mt-4"
-          >
-            Daily Listening
-          </motion.p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       <audio
         ref={audioRef}
         onEnded={handleSurahEnded}
