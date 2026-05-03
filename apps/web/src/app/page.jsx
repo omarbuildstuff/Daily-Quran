@@ -802,18 +802,6 @@ export default function QuranProjectPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* Streak chip — surfaces only when count > 0. Self reward
-                made visible: each return loads the next trigger. */}
-            {streak.count > 0 && view === "setup" && (
-              <div
-                className="flex items-center gap-1.5 px-3 py-2 bg-white/50 backdrop-blur-md border border-warm-200 rounded-full text-xs font-bold"
-                title={`${streak.count}-day listening streak`}
-                aria-label={`${streak.count}-day listening streak`}
-              >
-                <span aria-hidden="true">🔥</span>
-                <span className="font-mono tabular-nums">{streak.count}</span>
-              </div>
-            )}
             {view !== "setup" && (
               <button
                 onClick={handleEndSession}
@@ -928,47 +916,6 @@ export default function QuranProjectPage() {
                     </motion.div>
                   )}
                 </AnimatePresence>
-
-                {/* Recently played — last 3 surahs from history.
-                    1-tap to re-listen. Hidden if user has no history. */}
-                {(() => {
-                  const recents = Object.entries(listenedSurahs)
-                    .map(([sid, entry]) => ({ sid: Number(sid), ...entry }))
-                    .sort((a, b) => b.lastPlayed - a.lastPlayed)
-                    .slice(0, 3);
-                  if (recents.length === 0) return null;
-                  const totalHeard = Object.keys(listenedSurahs).length;
-                  return (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-mono uppercase tracking-widest text-warm-400">
-                          Recently played
-                        </p>
-                        <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400">
-                          {totalHeard} / 114 heard
-                        </p>
-                      </div>
-                      <div className="flex gap-2 flex-wrap">
-                        {recents.map((r) => {
-                          const ch = chapters.find((c) => c.id === r.sid);
-                          if (!ch) return null;
-                          return (
-                            <button
-                              key={r.sid}
-                              onClick={() => {
-                                setMode("surah");
-                                setSelectedSurah(r.sid);
-                              }}
-                              className="px-3 py-2 bg-white border border-warm-200 rounded-full text-xs font-bold hover:border-black/30 transition-colors"
-                            >
-                              {ch.name_simple}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
 
                 <div className="space-y-6">
                   <motion.div
@@ -1505,25 +1452,6 @@ export default function QuranProjectPage() {
                             <div className="h-px w-8" style={{ backgroundColor: "var(--accent-gold-soft)" }} />
                           </div>
 
-                          {/* Save-verse heart — toggles current verse in
-                              the bookmark list. Investment + self reward:
-                              user curates a personal collection. */}
-                          <div className="flex justify-center">
-                            <button
-                              onClick={toggleSaveCurrentVerse}
-                              aria-label={isCurrentVerseSaved ? "Unsave verse" : "Save verse"}
-                              aria-pressed={isCurrentVerseSaved}
-                              className="w-9 h-9 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95"
-                              style={{
-                                color: isCurrentVerseSaved
-                                  ? "var(--accent-gold-deep)"
-                                  : "var(--accent-gold-soft)",
-                              }}
-                            >
-                              <Bi name="heart-fill" size={18} />
-                            </button>
-                          </div>
-
                           {languageMode !== "english" && (
                             <h3
                               ref={arabicRef}
@@ -1553,7 +1481,7 @@ export default function QuranProjectPage() {
                     semi-transparent bottom chrome from bleeding into the dock */}
                 <div className="playback-fade fixed left-0 right-0 bottom-0 z-40 pointer-events-none" />
                 <div className="playback-dock fixed left-0 right-0 px-6 z-50">
-                  <div className="max-w-screen-sm mx-auto bg-white/90 backdrop-blur-2xl border border-warm-200 rounded-3xl px-6 py-5 shadow-overlay flex items-center justify-between gap-5">
+                  <div className="max-w-screen-sm mx-auto bg-white/90 backdrop-blur-2xl border border-warm-200 rounded-3xl px-6 py-5 shadow-overlay flex items-center justify-between gap-4">
                     <button
                       onClick={() => setIsPlaying(!isPlaying)}
                       className="w-14 h-14 bg-black rounded-2xl flex items-center justify-center text-white shadow-card hover:scale-105 active:scale-95 transition-all shrink-0"
@@ -1565,6 +1493,25 @@ export default function QuranProjectPage() {
                         <Bi name="play-fill" size={24} className="ml-0.5" />
                       )}
                     </button>
+
+                    {/* Save-verse heart — sits in the dock beside the play
+                        control. Investment + self reward: user curates a
+                        personal collection of verses to revisit. */}
+                    {currentAyah && (
+                      <button
+                        onClick={toggleSaveCurrentVerse}
+                        aria-label={isCurrentVerseSaved ? "Unsave verse" : "Save verse"}
+                        aria-pressed={isCurrentVerseSaved}
+                        className="w-11 h-11 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95 shrink-0 border border-warm-200 bg-white"
+                        style={{
+                          color: isCurrentVerseSaved
+                            ? "var(--accent-gold-deep)"
+                            : "var(--accent-gold-soft)",
+                        }}
+                      >
+                        <Bi name="heart-fill" size={18} />
+                      </button>
+                    )}
 
                     {/* Unified time / verse readout — single source of truth.
                         Surah mode without timer shows "verse N / total"; every
@@ -1693,6 +1640,28 @@ export default function QuranProjectPage() {
                       : `${targetDuration / 60} minutes with the words of Allah. May He bless your consistency.`}
                   </p>
                 </div>
+
+                {/* Streak reveal — surfaces only at the end of a session.
+                    Self reward made visible at the moment the user just
+                    earned it. Hidden during setup so it never feels naggy. */}
+                {streak.count > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.4, duration: 0.5, ease: "easeOut" }}
+                    className="inline-flex items-center gap-3 mx-auto px-5 py-3 bg-white border border-warm-200 rounded-full shadow-card"
+                  >
+                    <span className="text-xl" aria-hidden="true">🔥</span>
+                    <div className="text-left">
+                      <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400">
+                        Listening streak
+                      </p>
+                      <p className="text-lg font-bold font-mono tabular-nums leading-none">
+                        {streak.count} day{streak.count === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
 
                 <div className="flex flex-col gap-4 pt-12">
                   <button
