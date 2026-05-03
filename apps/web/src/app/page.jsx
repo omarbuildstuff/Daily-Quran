@@ -1486,7 +1486,7 @@ export default function QuranProjectPage() {
                                       key={i}
                                       className="inline-block px-1.5 py-0.5 mx-0.5 rounded-md transition-colors duration-150"
                                       style={{
-                                        backgroundColor: isActive ? "#10b981" : "transparent",
+                                        backgroundColor: isActive ? "rgb(0, 188, 109)" : "transparent",
                                         color: isActive ? "#fff" : "inherit",
                                       }}
                                     >
