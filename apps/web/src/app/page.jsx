@@ -1502,14 +1502,12 @@ export default function QuranProjectPage() {
                         onClick={toggleSaveCurrentVerse}
                         aria-label={isCurrentVerseSaved ? "Unsave verse" : "Save verse"}
                         aria-pressed={isCurrentVerseSaved}
-                        className="w-11 h-11 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95 shrink-0 border border-warm-200 bg-white"
+                        className="w-10 h-10 flex items-center justify-center transition-all hover:scale-110 active:scale-90 shrink-0"
                         style={{
-                          color: isCurrentVerseSaved
-                            ? "var(--accent-gold-deep)"
-                            : "var(--accent-gold-soft)",
+                          color: isCurrentVerseSaved ? "#e0245e" : "#c8c8c2",
                         }}
                       >
-                        <Bi name="heart-fill" size={18} />
+                        <Bi name="heart-fill" size={22} />
                       </button>
                     )}
 
