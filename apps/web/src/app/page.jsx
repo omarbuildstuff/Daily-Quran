@@ -114,6 +114,8 @@ export default function QuranProjectPage() {
   const [reciterId, setReciterId] = usePersistentState("reciterId", 7);
   const [targetDuration, setTargetDuration] = usePersistentState("targetDuration", 300);
   const [currentAyah, setCurrentAyah] = useState(null);
+  // Active word index (1-based) for karaoke-style highlight on the Arabic verse.
+  const [currentWordIdx, setCurrentWordIdx] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [startTime, setStartTime] = useState(0);
@@ -224,6 +226,10 @@ export default function QuranProjectPage() {
           translation: translationByVerse[v.verse_number] || "Translation not available",
           startMs: ts?.timestamp_from ?? 0,
           endMs: ts?.timestamp_to ?? 0,
+          // Per-word [wordIdx, startMs, endMs] segments (1-based word index,
+          // absolute ms relative to chapter audio). Powers karaoke-style
+          // highlighting of the Arabic verse during playback.
+          segments: Array.isArray(ts?.segments) ? ts.segments : [],
         };
       });
 
@@ -260,8 +266,20 @@ export default function QuranProjectPage() {
         text: active.text,
         translation: active.translation,
         surahName: sd.surahName,
+        segments: active.segments || [],
       };
     });
+    // Karaoke word highlight — find word being recited right now. Segments
+    // are [wordIdx, startMs, endMs] in absolute chapter-audio time.
+    if (active.segments && active.segments.length > 0) {
+      const seg = active.segments.find(
+        ([, s, e]) => currentMs >= s && currentMs < e,
+      );
+      const idx = seg ? seg[0] : 0;
+      setCurrentWordIdx((prev) => (prev === idx ? prev : idx));
+    } else {
+      setCurrentWordIdx(0);
+    }
   }, []);
 
   const handleTimeUpdate = useCallback(() => {
@@ -1455,10 +1473,28 @@ export default function QuranProjectPage() {
                           {languageMode !== "english" && (
                             <h3
                               ref={arabicRef}
-                              className="font-thmanyah text-4xl md:text-6xl leading-[1.4] md:leading-[1.4] text-center scroll-mt-32"
+                              className="font-thmanyah text-4xl md:text-6xl leading-[1.6] md:leading-[1.6] text-center scroll-mt-32"
                               dir="rtl"
                             >
-                              {currentAyah.text}
+                              {(() => {
+                                const words = currentAyah.text.trim().split(/\s+/);
+                                return words.map((word, i) => {
+                                  const wordIdx = i + 1; // segments are 1-based
+                                  const isActive = currentWordIdx === wordIdx;
+                                  return (
+                                    <span
+                                      key={i}
+                                      className="inline-block px-1.5 py-0.5 mx-0.5 rounded-md transition-colors duration-150"
+                                      style={{
+                                        backgroundColor: isActive ? "#10b981" : "transparent",
+                                        color: isActive ? "#fff" : "inherit",
+                                      }}
+                                    >
+                                      {word}
+                                    </span>
+                                  );
+                                });
+                              })()}
                             </h3>
                           )}
 
