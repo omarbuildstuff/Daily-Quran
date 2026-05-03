@@ -58,7 +58,7 @@ const RECITERS = [
 
 const DURATIONS = [
   { label: "5 min", value: 5 * 60 },
-  { label: "10 min", value: 10 * 60 },
+  { label: "10 min", value: 10 * 60, recommended: true },
   { label: "15 min", value: 15 * 60 },
 ];
 
@@ -595,7 +595,7 @@ export default function QuranProjectPage() {
   // ─────────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="app-shell text-[#1a1a1a] font-inter selection:bg-black selection:text-white">
+    <div className="app-shell text-warm-900 font-inter selection:bg-black selection:text-white">
       <audio
         ref={audioRef}
         onEnded={handleSurahEnded}
@@ -616,7 +616,7 @@ export default function QuranProjectPage() {
               <h1 className="text-lg font-sans font-bold tracking-tight leading-none">
                 Quran Hub
               </h1>
-              <p className="text-[10px] font-sans uppercase tracking-[0.2em] text-[#999] mt-1">
+              <p className="text-[10px] font-sans uppercase tracking-[0.2em] text-warm-400 mt-1">
                 Daily Listening
               </p>
             </div>
@@ -625,7 +625,7 @@ export default function QuranProjectPage() {
             {view !== "setup" && (
               <button
                 onClick={handleEndSession}
-                className="px-4 py-2 bg-white/50 backdrop-blur-md border border-[#e5e5e0] rounded-full text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition-all duration-300"
+                className="px-4 py-2 bg-white/50 backdrop-blur-md border border-warm-200 rounded-full text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition-all duration-300"
               >
                 End Session
               </button>
@@ -634,7 +634,7 @@ export default function QuranProjectPage() {
               <button
                 onClick={() => setShowSettings(true)}
                 aria-label="Settings"
-                className="w-10 h-10 bg-white/50 backdrop-blur-md border border-[#e5e5e0] rounded-full flex items-center justify-center text-[#666] hover:bg-black hover:text-white hover:border-black transition-all duration-300"
+                className="w-10 h-10 bg-white/50 backdrop-blur-md border border-warm-200 rounded-full flex items-center justify-center text-warm-500 hover:bg-black hover:text-white hover:border-black transition-all duration-300"
               >
                 <Bi name="gear-wide" size={16} />
               </button>
@@ -667,7 +667,7 @@ export default function QuranProjectPage() {
                     {getGreeting().line1} <br />
                     {getGreeting().line2}
                   </h2>
-                  <p className="text-xl text-[#666] max-w-sm leading-relaxed font-light">
+                  <p className="text-xl text-warm-500 max-w-sm leading-relaxed font-normal">
                     {mode === "surah"
                       ? "Pick a surah. Listen from the first verse to the last."
                       : "Choose how long and who recites. We'll never cut off mid-verse."}
@@ -676,13 +676,13 @@ export default function QuranProjectPage() {
 
                 <div className="grid gap-8">
                   {/* Mode Toggle */}
-                  <div className="flex gap-1 bg-[#f0f0ec] rounded-2xl p-1">
+                  <div className="flex gap-1 bg-warm-100 rounded-2xl p-1">
                     <button
                       onClick={() => setMode("random")}
                       className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all duration-300 ${
                         mode === "random"
                           ? "bg-white text-black shadow-sm"
-                          : "text-[#999] hover:text-[#666]"
+                          : "text-warm-400 hover:text-warm-500"
                       }`}
                     >
                       Randomize Surah
@@ -692,7 +692,7 @@ export default function QuranProjectPage() {
                       className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all duration-300 ${
                         mode === "surah"
                           ? "bg-white text-black shadow-sm"
-                          : "text-[#999] hover:text-[#666]"
+                          : "text-warm-400 hover:text-warm-500"
                       }`}
                     >
                       Choose Surah
@@ -709,7 +709,7 @@ export default function QuranProjectPage() {
                         transition={{ duration: 0.25, ease: "easeOut" }}
                         className="space-y-4"
                       >
-                        <div className="flex items-center gap-2 text-[#999]">
+                        <div className="flex items-center gap-2 text-warm-400">
                           <Bi name="chevron-right" size={14} />
                           <label className="text-xs font-mono uppercase tracking-widest">
                             Which surah?
@@ -719,7 +719,7 @@ export default function QuranProjectPage() {
                           <select
                             value={selectedSurah}
                             onChange={(e) => setSelectedSurah(Number(e.target.value))}
-                            className="w-full appearance-none bg-white border border-[#e5e5e0] rounded-2xl px-6 py-5 text-lg font-bold focus:outline-none focus:ring-2 focus:ring-black/10 cursor-pointer"
+                            className="w-full appearance-none bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-bold focus:outline-none focus:ring-2 focus:ring-black/10 cursor-pointer"
                           >
                             {chapters.map((c) => (
                               <option key={c.id} value={c.id}>
@@ -730,7 +730,7 @@ export default function QuranProjectPage() {
                           <Bi
                             name="chevron-right"
                             size={18}
-                            className="absolute right-4 top-1/2 -translate-y-1/2 text-[#999] rotate-90 pointer-events-none"
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-warm-400 rotate-90 pointer-events-none"
                           />
                         </div>
 
@@ -738,11 +738,11 @@ export default function QuranProjectPage() {
                         <div className="pt-4">
                           <button
                             onClick={() => setSurahTimerEnabled(!surahTimerEnabled)}
-                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-[#999] hover:text-black transition-colors"
+                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors"
                           >
                             <span
                               className={`w-8 h-5 rounded-full relative transition-colors ${
-                                surahTimerEnabled ? "bg-black" : "bg-[#e5e5e0]"
+                                surahTimerEnabled ? "bg-black" : "bg-warm-200"
                               }`}
                             >
                               <span
@@ -779,21 +779,29 @@ export default function QuranProjectPage() {
                                         setTargetDuration(d.value);
                                         setCustomMinutes("");
                                       }}
-                                      className={`flex-1 py-4 rounded-2xl text-lg font-bold transition-all duration-300 border ${
+                                      className={`relative flex-1 py-4 rounded-2xl text-lg font-bold transition-all duration-300 border ${
                                         targetDuration === d.value && !customMinutes
-                                          ? "bg-black text-white border-black shadow-2xl shadow-black/20"
-                                          : "bg-white text-[#666] border-[#e5e5e0] hover:border-black/20"
+                                          ? "bg-black text-white border-black shadow-overlay"
+                                          : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
                                       }`}
                                     >
                                       {d.label}
+                                      {d.recommended && (
+                                        <span
+                                          className="absolute -top-2 left-1/2 -translate-x-1/2 px-2 py-px rounded-full text-[9px] font-mono uppercase tracking-widest bg-gold text-warm-900"
+                                          style={{ letterSpacing: "0.15em" }}
+                                        >
+                                          Popular
+                                        </span>
+                                      )}
                                     </button>
                                   ))}
                                 </div>
                                 <div
                                   className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition-all duration-300 ${
                                     customMinutes
-                                      ? "bg-black border-black shadow-2xl shadow-black/20"
-                                      : "bg-white border-[#e5e5e0] hover:border-black/20"
+                                      ? "bg-black border-black shadow-overlay"
+                                      : "bg-white border-warm-200 hover:border-black/20"
                                   }`}
                                 >
                                   <input
@@ -812,12 +820,12 @@ export default function QuranProjectPage() {
                                     className={`flex-1 bg-transparent outline-none text-lg font-bold placeholder:font-normal ${
                                       customMinutes
                                         ? "text-white placeholder:text-white/40"
-                                        : "text-[#333] placeholder:text-[#aaa]"
+                                        : "text-warm-700 placeholder:text-warm-400"
                                     }`}
                                   />
                                   <span
                                     className={`text-sm font-bold uppercase tracking-widest ${
-                                      customMinutes ? "text-white/50" : "text-[#aaa]"
+                                      customMinutes ? "text-white/50" : "text-warm-400"
                                     }`}
                                   >
                                     min
@@ -832,11 +840,11 @@ export default function QuranProjectPage() {
                         <div className="pt-2">
                           <button
                             onClick={() => setMemorizationEnabled(!memorizationEnabled)}
-                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-[#999] hover:text-black transition-colors"
+                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors"
                           >
                             <span
                               className={`w-8 h-5 rounded-full relative transition-colors ${
-                                memorizationEnabled ? "bg-black" : "bg-[#e5e5e0]"
+                                memorizationEnabled ? "bg-black" : "bg-warm-200"
                               }`}
                             >
                               <span
@@ -870,8 +878,8 @@ export default function QuranProjectPage() {
                               >
                                 <div className="space-y-3 pt-4">
                                   <div className="flex gap-2">
-                                    <div className="flex-1 bg-white border border-[#e5e5e0] rounded-2xl px-5 py-4">
-                                      <p className="text-[10px] font-mono uppercase tracking-widest text-[#999] mb-1">
+                                    <div className="flex-1 bg-white border border-warm-200 rounded-2xl px-5 py-4">
+                                      <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400 mb-1">
                                         Start verse
                                       </p>
                                       <input
@@ -884,11 +892,11 @@ export default function QuranProjectPage() {
                                           setMemStartVerse(v);
                                           if (v > Number(memEndVerse)) setMemEndVerse(v);
                                         }}
-                                        className="w-full bg-transparent outline-none text-lg font-bold text-[#333]"
+                                        className="w-full bg-transparent outline-none text-lg font-bold text-warm-700"
                                       />
                                     </div>
-                                    <div className="flex-1 bg-white border border-[#e5e5e0] rounded-2xl px-5 py-4">
-                                      <p className="text-[10px] font-mono uppercase tracking-widest text-[#999] mb-1">
+                                    <div className="flex-1 bg-white border border-warm-200 rounded-2xl px-5 py-4">
+                                      <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400 mb-1">
                                         End verse
                                       </p>
                                       <input
@@ -900,21 +908,21 @@ export default function QuranProjectPage() {
                                           const v = clamp(e.target.value);
                                           setMemEndVerse(Math.max(v, Number(memStartVerse)));
                                         }}
-                                        className="w-full bg-transparent outline-none text-lg font-bold text-[#333]"
+                                        className="w-full bg-transparent outline-none text-lg font-bold text-warm-700"
                                       />
                                     </div>
                                   </div>
-                                  <p className="text-[11px] text-[#999] leading-snug">
+                                  <p className="text-[11px] text-warm-400 leading-snug">
                                     {versesCount} verses in this surah. Range loops or stops based on the toggle below.
                                   </p>
 
                                   <button
                                     onClick={() => setMemRepeat(!memRepeat)}
-                                    className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-[#999] hover:text-black transition-colors pt-1"
+                                    className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors pt-1"
                                   >
                                     <span
                                       className={`w-8 h-5 rounded-full relative transition-colors ${
-                                        memRepeat ? "bg-black" : "bg-[#e5e5e0]"
+                                        memRepeat ? "bg-black" : "bg-warm-200"
                                       }`}
                                     >
                                       <span
@@ -943,7 +951,7 @@ export default function QuranProjectPage() {
                         transition={{ duration: 0.25, ease: "easeOut" }}
                         className="space-y-4"
                       >
-                        <div className="flex items-center gap-2 text-[#999]">
+                        <div className="flex items-center gap-2 text-warm-400">
                           <Bi name="clock" size={14} />
                           <label className="text-xs font-mono uppercase tracking-widest">
                             How long?
@@ -957,21 +965,29 @@ export default function QuranProjectPage() {
                                 setTargetDuration(d.value);
                                 setCustomMinutes("");
                               }}
-                              className={`flex-1 py-4 rounded-2xl text-lg font-bold transition-all duration-300 border ${
+                              className={`relative flex-1 py-4 rounded-2xl text-lg font-bold transition-all duration-300 border ${
                                 targetDuration === d.value && !customMinutes
-                                  ? "bg-black text-white border-black shadow-2xl shadow-black/20"
-                                  : "bg-white text-[#666] border-[#e5e5e0] hover:border-black/20"
+                                  ? "bg-black text-white border-black shadow-overlay"
+                                  : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
                               }`}
                             >
                               {d.label}
+                              {d.recommended && (
+                                <span
+                                  className="absolute -top-2 left-1/2 -translate-x-1/2 px-2 py-px rounded-full text-[9px] font-mono uppercase tracking-widest bg-gold text-warm-900"
+                                  style={{ letterSpacing: "0.15em" }}
+                                >
+                                  Popular
+                                </span>
+                              )}
                             </button>
                           ))}
                         </div>
                         <div
                           className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition-all duration-300 ${
                             customMinutes
-                              ? "bg-black border-black shadow-2xl shadow-black/20"
-                              : "bg-white border-[#e5e5e0] hover:border-black/20"
+                              ? "bg-black border-black shadow-overlay"
+                              : "bg-white border-warm-200 hover:border-black/20"
                           }`}
                         >
                           <input
@@ -990,12 +1006,12 @@ export default function QuranProjectPage() {
                             className={`flex-1 bg-transparent outline-none text-lg font-bold placeholder:font-normal ${
                               customMinutes
                                 ? "text-white placeholder:text-white/40"
-                                : "text-[#333] placeholder:text-[#aaa]"
+                                : "text-warm-700 placeholder:text-warm-400"
                             }`}
                           />
                           <span
                             className={`text-sm font-bold uppercase tracking-widest ${
-                              customMinutes ? "text-white/50" : "text-[#aaa]"
+                              customMinutes ? "text-white/50" : "text-warm-400"
                             }`}
                           >
                             min
@@ -1006,11 +1022,11 @@ export default function QuranProjectPage() {
                         <div className="pt-4">
                           <button
                             onClick={() => setMoodEnabled(!moodEnabled)}
-                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-[#999] hover:text-black transition-colors"
+                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors"
                           >
                             <span
                               className={`w-8 h-5 rounded-full relative transition-colors ${
-                                moodEnabled ? "bg-black" : "bg-[#e5e5e0]"
+                                moodEnabled ? "bg-black" : "bg-warm-200"
                               }`}
                             >
                               <span
@@ -1045,8 +1061,8 @@ export default function QuranProjectPage() {
                                     onClick={() => setSelectedMood(m.id)}
                                     className={`flex items-center gap-2 py-3 px-4 rounded-2xl text-sm font-bold transition-all duration-300 border text-left ${
                                       selectedMood === m.id
-                                        ? "bg-black text-white border-black shadow-2xl shadow-black/20"
-                                        : "bg-white text-[#666] border-[#e5e5e0] hover:border-black/20"
+                                        ? "bg-black text-white border-black shadow-overlay"
+                                        : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
                                     }`}
                                   >
                                     <span className="text-base">{m.emoji}</span>
@@ -1062,7 +1078,7 @@ export default function QuranProjectPage() {
                   </AnimatePresence>
 
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 text-[#999]">
+                    <div className="flex items-center gap-2 text-warm-400">
                       <Bi name="globe" size={14} />
                       <label className="text-xs font-mono uppercase tracking-widest">
                         Who recites?
@@ -1072,7 +1088,7 @@ export default function QuranProjectPage() {
                       <select
                         value={reciterId}
                         onChange={(e) => setReciterId(Number(e.target.value))}
-                        className="w-full bg-white border border-[#e5e5e0] rounded-2xl px-6 py-5 text-lg font-medium appearance-none cursor-pointer focus:outline-none focus:ring-4 focus:ring-black/5 transition-all"
+                        className="w-full bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-medium appearance-none cursor-pointer focus:outline-none focus:ring-4 focus:ring-black/5 transition-all"
                       >
                         {RECITERS.map((r) => (
                           <option key={r.id} value={r.id}>
@@ -1080,7 +1096,7 @@ export default function QuranProjectPage() {
                           </option>
                         ))}
                       </select>
-                      <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none text-[#999]">
+                      <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none text-warm-400">
                         <Bi name="chevron-right" size={20} className="rotate-90" />
                       </div>
                     </div>
@@ -1089,7 +1105,7 @@ export default function QuranProjectPage() {
 
                 <button
                   onClick={startPlayback}
-                  className="w-full bg-black text-white rounded-[1.75rem] py-6 text-xl font-bold shadow-xl shadow-black/30 hover:shadow-black/40 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-3 group"
+                  className="w-full bg-black text-white rounded-2xl py-6 text-xl font-bold shadow-dropdown hover:shadow-black/40 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-3 group"
                 >
                   Start Listening
                   <Bi
@@ -1142,7 +1158,7 @@ export default function QuranProjectPage() {
                         >
                           <div className="flex items-center justify-center gap-4">
                             <div className="h-px w-8" style={{ backgroundColor: "var(--accent-gold-soft)" }} />
-                            <p className="text-[10px] font-mono uppercase tracking-[0.3em] text-[#999]">
+                            <p className="text-[10px] font-mono uppercase tracking-[0.3em] text-warm-400">
                               Surah {currentAyah.surahName} • Verse{" "}
                               {currentAyah.key}
                             </p>
@@ -1162,7 +1178,7 @@ export default function QuranProjectPage() {
                           {languageMode !== "arabic" && (
                             <p
                               ref={englishRef}
-                              className="text-xl md:text-3xl text-[#666] leading-relaxed italic max-w-2xl mx-auto font-light scroll-mt-32"
+                              className="text-xl md:text-3xl text-warm-500 leading-relaxed italic max-w-2xl mx-auto font-normal scroll-mt-32"
                             >
                               {currentAyah.translation}
                             </p>
@@ -1178,11 +1194,11 @@ export default function QuranProjectPage() {
                     semi-transparent bottom chrome from bleeding into the dock */}
                 <div className="playback-fade fixed left-0 right-0 bottom-0 z-40 pointer-events-none" />
                 <div className="playback-dock fixed left-0 right-0 px-6 z-50">
-                  <div className="max-w-screen-sm mx-auto bg-white/90 backdrop-blur-2xl border border-[#e5e5e0] rounded-[2.25rem] px-6 py-5 shadow-[0_28px_56px_-16px_rgba(0,0,0,0.1)] flex items-center justify-between gap-5">
+                  <div className="max-w-screen-sm mx-auto bg-white/90 backdrop-blur-2xl border border-warm-200 rounded-3xl px-6 py-5 shadow-overlay flex items-center justify-between gap-5">
                     <div className="flex items-center gap-5">
                       <button
                         onClick={() => setIsPlaying(!isPlaying)}
-                        className="w-14 h-14 bg-black rounded-[1.3rem] flex items-center justify-center text-white shadow-lg shadow-black/20 hover:scale-105 active:scale-95 transition-all"
+                        className="w-14 h-14 bg-black rounded-2xl flex items-center justify-center text-white shadow-card hover:scale-105 active:scale-95 transition-all"
                       >
                         {isPlaying ? (
                           <Bi name="pause-fill" size={24} />
@@ -1194,7 +1210,7 @@ export default function QuranProjectPage() {
                         <p className="text-lg font-bold font-mono tracking-tighter">
                           {formatTime(elapsedTime)}
                         </p>
-                        <p className="text-[10px] uppercase tracking-widest text-[#999] font-bold">
+                        <p className="text-[10px] uppercase tracking-widest text-warm-400 font-bold">
                           Progress
                         </p>
                       </div>
@@ -1206,7 +1222,7 @@ export default function QuranProjectPage() {
                           ? `${currentAyah.key.split(":")[1]}/${chapters.find((c) => c.id === selectedSurah)?.verses_count || "?"}`
                           : formatTime(targetDuration)}
                       </p>
-                      <p className="text-[10px] uppercase tracking-widest text-[#999] font-bold">
+                      <p className="text-[10px] uppercase tracking-widest text-warm-400 font-bold">
                         {mode === "surah" && !surahTimerEnabled ? "Verse" : "Duration"}
                       </p>
                     </div>
@@ -1215,7 +1231,7 @@ export default function QuranProjectPage() {
                   {/* Progress Bar under the capsule — plain div + CSS transform for
                       cheap 60fps animation. Scaling is GPU-composited, unlike width. */}
                   <div className="max-w-screen-sm mx-auto mt-4 px-8">
-                    <div className="h-1 w-full bg-[#f0f0eb] rounded-full overflow-hidden">
+                    <div className="h-1 w-full bg-warm-100 rounded-full overflow-hidden">
                       <div
                         className="h-full rounded-full origin-left"
                         style={{
@@ -1266,7 +1282,7 @@ export default function QuranProjectPage() {
                     Barakallahu <br />
                     Feekum.
                   </h2>
-                  <p className="text-[#666] text-xl max-w-sm mx-auto font-light leading-relaxed">
+                  <p className="text-warm-500 text-xl max-w-sm mx-auto font-normal leading-relaxed">
                     {mode === "surah" && surahTimerEnabled
                       ? `${targetDuration / 60} minutes with Surah ${chapters.find((c) => c.id === selectedSurah)?.name_simple || ""}. May Allah bless your consistency.`
                       : mode === "surah"
@@ -1278,13 +1294,13 @@ export default function QuranProjectPage() {
                 <div className="flex flex-col gap-4 pt-12">
                   <button
                     onClick={() => setView("setup")}
-                    className="bg-black text-white rounded-2xl py-6 text-xl font-bold shadow-2xl shadow-black/20 hover:scale-[1.02] active:scale-98 transition-all"
+                    className="bg-black text-white rounded-2xl py-6 text-xl font-bold shadow-overlay hover:scale-[1.02] active:scale-98 transition-all"
                   >
                     New Session
                   </button>
                   <button
                     onClick={handleRepeat}
-                    className="text-[#666] py-4 text-sm font-bold uppercase tracking-widest hover:text-black transition-colors"
+                    className="text-warm-500 py-4 text-sm font-bold uppercase tracking-widest hover:text-black transition-colors"
                   >
                     Repeat
                   </button>
@@ -1326,7 +1342,7 @@ export default function QuranProjectPage() {
                 exit={{ opacity: 0, y: 20, scale: 0.96 }}
                 transition={{ duration: 0.25, ease: "easeOut" }}
                 onClick={(e) => e.stopPropagation()}
-                className="w-full max-w-md bg-white border border-[#e5e5e0] rounded-[2rem] p-8 shadow-2xl"
+                className="w-full max-w-md bg-white border border-warm-200 rounded-3xl p-8 shadow-2xl"
               >
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-2xl font-bold font-resolide tracking-tight">
@@ -1335,7 +1351,7 @@ export default function QuranProjectPage() {
                   <button
                     onClick={() => setShowSettings(false)}
                     aria-label="Close settings"
-                    className="w-9 h-9 rounded-full border border-[#e5e5e0] flex items-center justify-center text-[#666] hover:bg-black hover:text-white hover:border-black transition-all"
+                    className="w-9 h-9 rounded-full border border-warm-200 flex items-center justify-center text-warm-500 hover:bg-black hover:text-white hover:border-black transition-all"
                   >
                     <Bi name="x-lg" size={14} />
                   </button>
@@ -1348,16 +1364,16 @@ export default function QuranProjectPage() {
                     className="w-full flex items-start justify-between gap-4 py-3 text-left"
                   >
                     <div className="flex-1">
-                      <p className="text-base font-bold text-[#1a1a1a]">
+                      <p className="text-base font-bold text-warm-900">
                         Auto-stop on timer end
                       </p>
-                      <p className="text-sm text-[#999] leading-snug mt-1">
+                      <p className="text-sm text-warm-400 leading-snug mt-1">
                         Stop playback when the timer runs out. Off lets the surah finish.
                       </p>
                     </div>
                     <span
                       className={`shrink-0 mt-1 w-11 h-6 rounded-full relative transition-colors ${
-                        autoStopTimer ? "bg-black" : "bg-[#e5e5e0]"
+                        autoStopTimer ? "bg-black" : "bg-warm-200"
                       }`}
                     >
                       <span
@@ -1371,19 +1387,19 @@ export default function QuranProjectPage() {
                     </span>
                   </button>
 
-                  <div className="h-px bg-[#f0f0eb]" />
+                  <div className="h-px bg-warm-100" />
 
                   {/* Language display */}
                   <div className="py-3 space-y-3">
                     <div>
-                      <p className="text-base font-bold text-[#1a1a1a]">
+                      <p className="text-base font-bold text-warm-900">
                         Language display
                       </p>
-                      <p className="text-sm text-[#999] leading-snug mt-1">
+                      <p className="text-sm text-warm-400 leading-snug mt-1">
                         What to show while you listen.
                       </p>
                     </div>
-                    <div className="flex gap-1 bg-[#f0f0ec] rounded-xl p-1">
+                    <div className="flex gap-1 bg-warm-100 rounded-xl p-1">
                       {[
                         { id: "arabic", label: "Arabic" },
                         { id: "english", label: "English" },
@@ -1395,7 +1411,7 @@ export default function QuranProjectPage() {
                           className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
                             languageMode === opt.id
                               ? "bg-white text-black shadow-sm"
-                              : "text-[#999] hover:text-[#666]"
+                              : "text-warm-400 hover:text-warm-500"
                           }`}
                         >
                           {opt.label}
@@ -1415,14 +1431,14 @@ export default function QuranProjectPage() {
                       >
                         <div className="py-3 space-y-3">
                           <div>
-                            <p className="text-base font-bold text-[#1a1a1a]">
+                            <p className="text-base font-bold text-warm-900">
                               Focus on new verse
                             </p>
-                            <p className="text-sm text-[#999] leading-snug mt-1">
+                            <p className="text-sm text-warm-400 leading-snug mt-1">
                               Which language gets emphasized when a verse arrives.
                             </p>
                           </div>
-                          <div className="flex gap-1 bg-[#f0f0ec] rounded-xl p-1">
+                          <div className="flex gap-1 bg-warm-100 rounded-xl p-1">
                             {[
                               { id: "arabic", label: "Arabic" },
                               { id: "english", label: "English" },
@@ -1433,7 +1449,7 @@ export default function QuranProjectPage() {
                                 className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
                                   autoFocus === opt.id
                                     ? "bg-white text-black shadow-sm"
-                                    : "text-[#999] hover:text-[#666]"
+                                    : "text-warm-400 hover:text-warm-500"
                                 }`}
                               >
                                 {opt.label}

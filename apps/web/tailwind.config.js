@@ -1583,6 +1583,34 @@ module.exports = {
 				'zilla-slab': 'Zilla Slab',
 				'zilla-slab-highlight': 'Zilla Slab Highlight',
 			},
+			colors: {
+				// Warm gray scale — 7 stops, slight yellow/brown tint to match the
+				// warm cream background. Replaces the scattered hex literals
+				// (#1a1a1a / #666 / #999 / #e5e5e0 / #f0f0eb) used inline.
+				warm: {
+					50:  '#faf9f5',
+					100: '#f0f0eb',
+					200: '#e5e5e0',
+					300: '#cfcfc8',
+					400: '#999996',
+					500: '#666664',
+					600: '#444442',
+					700: '#2b2b29',
+					900: '#1a1a1a',
+				},
+				gold: {
+					soft: 'oklch(86% 0.06 75)',
+					DEFAULT: 'oklch(72% 0.11 75)',
+					deep: 'oklch(55% 0.12 65)',
+				},
+			},
+			boxShadow: {
+				// Elevation tier scale — purpose-named so usage stays consistent.
+				raised:   '0 1px 2px rgba(26,26,26,0.05), 0 1px 1px rgba(26,26,26,0.04)',
+				card:     '0 4px 12px -4px rgba(26,26,26,0.08), 0 2px 4px -2px rgba(26,26,26,0.05)',
+				dropdown: '0 12px 24px -8px rgba(26,26,26,0.12), 0 4px 8px -4px rgba(26,26,26,0.06)',
+				overlay:  '0 28px 56px -16px rgba(26,26,26,0.15), 0 8px 16px -8px rgba(26,26,26,0.08)',
+			},
 		},
 	},
 };
