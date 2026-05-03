@@ -58,7 +58,7 @@ const RECITERS = [
 
 const DURATIONS = [
   { label: "5 min", value: 5 * 60 },
-  { label: "10 min", value: 10 * 60, recommended: true },
+  { label: "10 min", value: 10 * 60 },
   { label: "15 min", value: 15 * 60 },
 ];
 
@@ -786,14 +786,6 @@ export default function QuranProjectPage() {
                                       }`}
                                     >
                                       {d.label}
-                                      {d.recommended && (
-                                        <span
-                                          className="absolute -top-2 left-1/2 -translate-x-1/2 px-2 py-px rounded-full text-[9px] font-mono uppercase tracking-widest bg-gold text-warm-900"
-                                          style={{ letterSpacing: "0.15em" }}
-                                        >
-                                          Popular
-                                        </span>
-                                      )}
                                     </button>
                                   ))}
                                 </div>
@@ -972,14 +964,6 @@ export default function QuranProjectPage() {
                               }`}
                             >
                               {d.label}
-                              {d.recommended && (
-                                <span
-                                  className="absolute -top-2 left-1/2 -translate-x-1/2 px-2 py-px rounded-full text-[9px] font-mono uppercase tracking-widest bg-gold text-warm-900"
-                                  style={{ letterSpacing: "0.15em" }}
-                                >
-                                  Popular
-                                </span>
-                              )}
                             </button>
                           ))}
                         </div>
