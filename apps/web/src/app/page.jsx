@@ -1712,9 +1712,9 @@ export default function QuranProjectPage() {
                 exit={{ opacity: 0, y: 20, scale: 0.96 }}
                 transition={{ duration: 0.25, ease: "easeOut" }}
                 onClick={(e) => e.stopPropagation()}
-                className="w-full max-w-md bg-white border border-warm-200 rounded-3xl p-8 shadow-2xl"
+                className="w-full max-w-md max-h-[85vh] bg-white border border-warm-200 rounded-3xl shadow-overlay overflow-hidden flex flex-col"
               >
-                <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center justify-between p-8 pb-4 shrink-0">
                   <h3 className="text-2xl font-bold font-resolide tracking-tight">
                     Settings
                   </h3>
@@ -1727,7 +1727,7 @@ export default function QuranProjectPage() {
                   </button>
                 </div>
 
-                <div className="space-y-5">
+                <div className="flex-1 overflow-y-auto px-8 pb-8 space-y-5 settings-scroll">
                   {/* Saved verses — opens the bookmarks panel */}
                   <button
                     onClick={() => {
