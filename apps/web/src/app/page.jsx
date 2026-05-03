@@ -928,7 +928,7 @@ export default function QuranProjectPage() {
                       willChange: "transform",
                     }}
                   />
-                  <h2 className="text-5xl md:text-7xl font-resolide font-bold leading-[1.1] tracking-tight">
+                  <h2 className="font-thmanyah text-5xl md:text-7xl font-bold leading-[1.1] tracking-tight">
                     {getGreeting().line1} <br />
                     {getGreeting().line2}
                   </h2>
@@ -1441,7 +1441,7 @@ export default function QuranProjectPage() {
                           transition={{ duration: 0.3, ease: "easeOut" }}
                           onAnimationComplete={handleVerseEntered}
                           style={{ willChange: "transform, opacity" }}
-                          className="space-y-8"
+                          className="space-y-6"
                         >
                           <div className="flex items-center justify-center gap-4">
                             <div className="h-px w-8" style={{ backgroundColor: "var(--accent-gold-soft)" }} />
