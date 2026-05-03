@@ -1455,7 +1455,7 @@ export default function QuranProjectPage() {
                           {languageMode !== "english" && (
                             <h3
                               ref={arabicRef}
-                              className="text-4xl md:text-6xl font-serif leading-[1.4] md:leading-[1.4] text-center scroll-mt-32"
+                              className="font-thmanyah text-4xl md:text-6xl leading-[1.4] md:leading-[1.4] text-center scroll-mt-32"
                               dir="rtl"
                             >
                               {currentAyah.text}
@@ -1465,7 +1465,7 @@ export default function QuranProjectPage() {
                           {languageMode !== "arabic" && (
                             <p
                               ref={englishRef}
-                              className="font-fraunces text-xl md:text-3xl text-warm-500 leading-relaxed italic max-w-2xl mx-auto font-normal scroll-mt-32"
+                              className="font-thmanyah text-xl md:text-3xl text-warm-500 leading-relaxed max-w-2xl mx-auto font-normal scroll-mt-32"
                             >
                               {currentAyah.translation}
                             </p>
@@ -2015,8 +2015,56 @@ export default function QuranProjectPage() {
           font-display: swap;
         }
 
+        /* Thmanyah Serif Display — display serif covering both Latin and
+           Arabic. Used as the primary face for the Quran verse + English
+           translation. woff2 first, otf fallback for older browsers. */
+        @font-face {
+          font-family: 'Thmanyah Serif Display';
+          src: url('/thmanyahserifdisplay/woff2/thmanyahserifdisplay-Light.woff2') format('woff2'),
+               url('/thmanyahserifdisplay/otf/thmanyahserifdisplay-Light.otf') format('opentype');
+          font-weight: 300;
+          font-style: normal;
+          font-display: swap;
+        }
+        @font-face {
+          font-family: 'Thmanyah Serif Display';
+          src: url('/thmanyahserifdisplay/woff2/thmanyahserifdisplay-Regular.woff2') format('woff2'),
+               url('/thmanyahserifdisplay/otf/thmanyahserifdisplay-Regular.otf') format('opentype');
+          font-weight: 400;
+          font-style: normal;
+          font-display: swap;
+        }
+        @font-face {
+          font-family: 'Thmanyah Serif Display';
+          src: url('/thmanyahserifdisplay/woff2/thmanyahserifdisplay-Medium.woff2') format('woff2'),
+               url('/thmanyahserifdisplay/otf/thmanyahserifdisplay-Medium.otf') format('opentype');
+          font-weight: 500;
+          font-style: normal;
+          font-display: swap;
+        }
+        @font-face {
+          font-family: 'Thmanyah Serif Display';
+          src: url('/thmanyahserifdisplay/woff2/thmanyahserifdisplay-Bold.woff2') format('woff2'),
+               url('/thmanyahserifdisplay/otf/thmanyahserifdisplay-Bold.otf') format('opentype');
+          font-weight: 700;
+          font-style: normal;
+          font-display: swap;
+        }
+        @font-face {
+          font-family: 'Thmanyah Serif Display';
+          src: url('/thmanyahserifdisplay/woff2/thmanyahserifdisplay-Black.woff2') format('woff2'),
+               url('/thmanyahserifdisplay/otf/thmanyahserifdisplay-Black.otf') format('opentype');
+          font-weight: 900;
+          font-style: normal;
+          font-display: swap;
+        }
+
         .font-resolide {
           font-family: 'Arsenica', 'Resolide Serif', 'Playfair Display', serif;
+        }
+
+        .font-thmanyah {
+          font-family: 'Thmanyah Serif Display', 'Fraunces', 'Playfair Display', Georgia, serif;
         }
 
         .font-fraunces {
