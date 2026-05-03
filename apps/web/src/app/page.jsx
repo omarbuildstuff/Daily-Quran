@@ -116,6 +116,8 @@ export default function QuranProjectPage() {
   const [currentAyah, setCurrentAyah] = useState(null);
   // Active word index (1-based) for karaoke-style highlight on the Arabic verse.
   const [currentWordIdx, setCurrentWordIdx] = useState(0);
+  // Word the user is hovering / tapping on — drives the translation tooltip.
+  const [hoveredWordPos, setHoveredWordPos] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [startTime, setStartTime] = useState(0);
@@ -189,7 +191,7 @@ export default function QuranProjectPage() {
           `https://api.quran.com/api/v4/chapter_recitations/${reciterId}/${surahId}?segments=true`,
         ),
         fetch(
-          `https://api.quran.com/api/v4/verses/by_chapter/${surahId}?fields=text_uthmani&per_page=300`,
+          `https://api.quran.com/api/v4/verses/by_chapter/${surahId}?fields=text_uthmani&words=true&word_fields=text_uthmani&per_page=300`,
         ),
         fetch(
           `https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/eng-mustafakhattaba/${surahId}.json`,
@@ -219,6 +221,17 @@ export default function QuranProjectPage() {
 
       const verses = versesData.verses.map((v) => {
         const ts = timestamps.find((t) => t.verse_key === v.verse_key);
+        // Per-word data: text + English translation + transliteration.
+        // Filter out end-of-verse markers (char_type_name === "end").
+        // `position` is 1-based and matches the segment word index.
+        const words = (v.words || [])
+          .filter((w) => w.char_type_name === "word")
+          .map((w) => ({
+            position: w.position,
+            text: w.text_uthmani || w.text || "",
+            translation: w.translation?.text || "",
+            transliteration: w.transliteration?.text || "",
+          }));
         return {
           num: v.verse_number,
           key: v.verse_key,
@@ -230,6 +243,7 @@ export default function QuranProjectPage() {
           // absolute ms relative to chapter audio). Powers karaoke-style
           // highlighting of the Arabic verse during playback.
           segments: Array.isArray(ts?.segments) ? ts.segments : [],
+          words,
         };
       });
 
@@ -267,6 +281,7 @@ export default function QuranProjectPage() {
         translation: active.translation,
         surahName: sd.surahName,
         segments: active.segments || [],
+        words: active.words || [],
       };
     });
     // Karaoke word highlight — find word being recited right now. Segments
@@ -398,6 +413,8 @@ export default function QuranProjectPage() {
             text: initialVerse.text,
             translation: initialVerse.translation,
             surahName: data.surahName,
+            segments: initialVerse.segments || [],
+            words: initialVerse.words || [],
           });
         }
 
@@ -609,6 +626,8 @@ export default function QuranProjectPage() {
         text: startV.text,
         translation: startV.translation,
         surahName: data.surahName,
+        segments: startV.segments || [],
+        words: startV.words || [],
       });
       const el = audioRef.current;
       if (el) {
@@ -690,6 +709,22 @@ export default function QuranProjectPage() {
       savedAt: Date.now(),
     });
   }, [currentAyah?.key, view, mode, setLastSession]);
+
+  // Dismiss the word translation tooltip when the user taps outside any
+  // word. The tap-to-toggle pattern lets mobile (no hover) reach tooltips,
+  // and this effect makes them dismissible.
+  useEffect(() => {
+    if (hoveredWordPos === null) return;
+    const onDocClick = () => setHoveredWordPos(null);
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [hoveredWordPos]);
+
+  // Clear tooltip when the active verse changes — stale tooltip would
+  // point at a word that's no longer on screen.
+  useEffect(() => {
+    setHoveredWordPos(null);
+  }, [currentAyah?.key]);
 
   // On mount, check if there's a recent (<24h) session bookmark — if so,
   // surface a one-tap "Resume" prompt. Hidden until the user has actually
@@ -1473,24 +1508,70 @@ export default function QuranProjectPage() {
                           {languageMode !== "english" && (
                             <h3
                               ref={arabicRef}
-                              className="font-thmanyah text-4xl md:text-6xl leading-[1.6] md:leading-[1.6] text-center scroll-mt-32"
+                              className="font-thmanyah text-4xl md:text-6xl leading-[1.7] md:leading-[1.7] text-center scroll-mt-32"
                               dir="rtl"
                             >
                               {(() => {
-                                const words = currentAyah.text.trim().split(/\s+/);
-                                return words.map((word, i) => {
-                                  const wordIdx = i + 1; // segments are 1-based
-                                  const isActive = currentWordIdx === wordIdx;
+                                // Prefer the per-word data from the API
+                                // (text + translation + transliteration).
+                                // Fall back to splitting on whitespace if
+                                // words[] isn't populated yet (loading).
+                                const words =
+                                  currentAyah.words && currentAyah.words.length > 0
+                                    ? currentAyah.words
+                                    : currentAyah.text
+                                        .trim()
+                                        .split(/\s+/)
+                                        .map((t, i) => ({
+                                          position: i + 1,
+                                          text: t,
+                                          translation: "",
+                                          transliteration: "",
+                                        }));
+                                return words.map((w) => {
+                                  const isActive = currentWordIdx === w.position;
+                                  const isHovered = hoveredWordPos === w.position;
                                   return (
                                     <span
-                                      key={i}
-                                      className="inline-block px-1.5 py-0.5 mx-0.5 rounded-md transition-colors duration-150"
+                                      key={w.position}
+                                      className="relative inline-block px-1.5 py-0.5 mx-0.5 rounded-md transition-colors duration-150 cursor-help"
                                       style={{
-                                        backgroundColor: isActive ? "rgb(0, 188, 109)" : "transparent",
+                                        backgroundColor: isActive
+                                          ? "rgb(0, 188, 109)"
+                                          : "transparent",
                                         color: isActive ? "#fff" : "inherit",
                                       }}
+                                      onMouseEnter={() => setHoveredWordPos(w.position)}
+                                      onMouseLeave={() =>
+                                        setHoveredWordPos((prev) =>
+                                          prev === w.position ? null : prev,
+                                        )
+                                      }
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setHoveredWordPos((prev) =>
+                                          prev === w.position ? null : w.position,
+                                        );
+                                      }}
                                     >
-                                      {word}
+                                      {w.text}
+                                      {isHovered && w.translation && (
+                                        <span
+                                          dir="ltr"
+                                          className="word-tooltip absolute left-1/2 bottom-full mb-2 -translate-x-1/2 z-30 whitespace-nowrap pointer-events-none"
+                                        >
+                                          <span className="block bg-warm-900 text-white text-xs font-sans font-medium leading-tight px-3 py-2 rounded-lg shadow-overlay">
+                                            <span className="block">
+                                              {w.translation}
+                                            </span>
+                                            {w.transliteration && (
+                                              <span className="block text-[10px] text-warm-300 italic mt-0.5">
+                                                {w.transliteration}
+                                              </span>
+                                            )}
+                                          </span>
+                                        </span>
+                                      )}
                                     </span>
                                   );
                                 });
