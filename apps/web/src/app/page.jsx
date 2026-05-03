@@ -137,6 +137,12 @@ export default function QuranProjectPage() {
   const [autoStopTimer, setAutoStopTimer] = usePersistentState("autoStopTimer", true);
   const [languageMode, setLanguageMode] = usePersistentState("languageMode", "both"); // 'arabic' | 'english' | 'both'
   const [autoFocus, setAutoFocus] = usePersistentState("autoFocus", "arabic"); // 'arabic' | 'english' — only applies when languageMode === 'both'
+  // Recitation karaoke highlight + per-word translation tooltip — both off by
+  // default. User opts in from Settings.
+  const [karaokeEnabled, setKaraokeEnabled] = usePersistentState("karaokeEnabled", false);
+  const [wordTooltipsEnabled, setWordTooltipsEnabled] = usePersistentState("wordTooltipsEnabled", false);
+  // Color of the karaoke highlight — 'gold' (matches accent palette) or 'green'.
+  const [karaokeColor, setKaraokeColor] = usePersistentState("karaokeColor", "gold");
 
   // Last-session bookmark — persisted on every verse change. Used by the
   // "Resume from where you left off?" prompt on the setup view.
@@ -1528,31 +1534,49 @@ export default function QuranProjectPage() {
                                           translation: "",
                                           transliteration: "",
                                         }));
+                                const KARAOKE_COLOR =
+                                  karaokeColor === "green"
+                                    ? "rgb(0, 188, 109)"
+                                    : "var(--accent-gold-deep)";
                                 return words.map((w) => {
-                                  const isActive = currentWordIdx === w.position;
-                                  const isHovered = hoveredWordPos === w.position;
+                                  const isActive =
+                                    karaokeEnabled && currentWordIdx === w.position;
+                                  const isHovered =
+                                    wordTooltipsEnabled && hoveredWordPos === w.position;
+                                  const tooltipsOn = wordTooltipsEnabled;
                                   return (
                                     <span
                                       key={w.position}
-                                      className="relative inline-block px-1.5 py-0.5 mx-0.5 rounded-md transition-colors duration-150 cursor-help"
+                                      className={`relative inline-block px-1.5 py-0.5 mx-0.5 rounded-md transition-colors duration-150 ${tooltipsOn ? "cursor-help" : "cursor-default"}`}
                                       style={{
                                         backgroundColor: isActive
-                                          ? "rgb(0, 188, 109)"
+                                          ? KARAOKE_COLOR
                                           : "transparent",
                                         color: isActive ? "#fff" : "inherit",
                                       }}
-                                      onMouseEnter={() => setHoveredWordPos(w.position)}
-                                      onMouseLeave={() =>
-                                        setHoveredWordPos((prev) =>
-                                          prev === w.position ? null : prev,
-                                        )
+                                      onMouseEnter={
+                                        tooltipsOn
+                                          ? () => setHoveredWordPos(w.position)
+                                          : undefined
                                       }
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setHoveredWordPos((prev) =>
-                                          prev === w.position ? null : w.position,
-                                        );
-                                      }}
+                                      onMouseLeave={
+                                        tooltipsOn
+                                          ? () =>
+                                              setHoveredWordPos((prev) =>
+                                                prev === w.position ? null : prev,
+                                              )
+                                          : undefined
+                                      }
+                                      onClick={
+                                        tooltipsOn
+                                          ? (e) => {
+                                              e.stopPropagation();
+                                              setHoveredWordPos((prev) =>
+                                                prev === w.position ? null : w.position,
+                                              );
+                                            }
+                                          : undefined
+                                      }
                                     >
                                       {w.text}
                                       {isHovered && w.translation && (
@@ -1560,7 +1584,7 @@ export default function QuranProjectPage() {
                                           dir="ltr"
                                           className="word-tooltip absolute left-1/2 bottom-full mb-2 -translate-x-1/2 z-30 whitespace-nowrap pointer-events-none"
                                         >
-                                          <span className="block bg-warm-900 text-white text-xs font-sans font-medium leading-tight px-3 py-2 rounded-lg shadow-overlay">
+                                          <span className="block bg-warm-900 text-white text-sm font-thmanyah font-normal leading-tight px-3 py-2 rounded-lg shadow-overlay">
                                             <span className="block">
                                               {w.translation}
                                             </span>
@@ -1911,6 +1935,113 @@ export default function QuranProjectPage() {
                       </div>
                     )}
                   </div>
+
+                  <div className="h-px bg-warm-100" />
+
+                  {/* Karaoke highlight on Arabic verse */}
+                  <button
+                    onClick={() => setKaraokeEnabled(!karaokeEnabled)}
+                    className="w-full flex items-start justify-between gap-4 py-3 text-left"
+                  >
+                    <div className="flex-1">
+                      <p className="text-base font-bold text-warm-900">
+                        Highlight word being recited
+                      </p>
+                      <p className="text-sm text-warm-400 leading-snug mt-1">
+                        Color the active Arabic word as the reciter says it.
+                      </p>
+                    </div>
+                    <span
+                      className={`shrink-0 mt-1 w-11 h-6 rounded-full relative transition-colors ${
+                        karaokeEnabled ? "bg-black" : "bg-warm-200"
+                      }`}
+                    >
+                      <span
+                        className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm"
+                        style={{
+                          transform: karaokeEnabled ? "translateX(20px)" : "translateX(0)",
+                          transition: "transform 180ms ease-out",
+                          willChange: "transform",
+                        }}
+                      />
+                    </span>
+                  </button>
+
+                  <AnimatePresence>
+                    {karaokeEnabled && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.25, ease: "easeOut" }}
+                        className="overflow-hidden"
+                      >
+                        <div className="py-3 space-y-3">
+                          <p className="text-xs font-mono uppercase tracking-widest text-warm-400">
+                            Highlight color
+                          </p>
+                          <div className="flex gap-1 bg-warm-100 rounded-xl p-1">
+                            {[
+                              { id: "gold", label: "Gold" },
+                              { id: "green", label: "Green" },
+                            ].map((opt) => (
+                              <button
+                                key={opt.id}
+                                onClick={() => setKaraokeColor(opt.id)}
+                                className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+                                  karaokeColor === opt.id
+                                    ? "bg-white text-black shadow-sm"
+                                    : "text-warm-400 hover:text-warm-500"
+                                }`}
+                              >
+                                <span
+                                  className="block w-3 h-3 rounded-full"
+                                  style={{
+                                    backgroundColor:
+                                      opt.id === "green"
+                                        ? "rgb(0, 188, 109)"
+                                        : "var(--accent-gold-deep)",
+                                  }}
+                                />
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <div className="h-px bg-warm-100" />
+
+                  {/* Word translation tooltips */}
+                  <button
+                    onClick={() => setWordTooltipsEnabled(!wordTooltipsEnabled)}
+                    className="w-full flex items-start justify-between gap-4 py-3 text-left"
+                  >
+                    <div className="flex-1">
+                      <p className="text-base font-bold text-warm-900">
+                        Tap word for translation
+                      </p>
+                      <p className="text-sm text-warm-400 leading-snug mt-1">
+                        Show a tooltip with the word's meaning on hover or tap.
+                      </p>
+                    </div>
+                    <span
+                      className={`shrink-0 mt-1 w-11 h-6 rounded-full relative transition-colors ${
+                        wordTooltipsEnabled ? "bg-black" : "bg-warm-200"
+                      }`}
+                    >
+                      <span
+                        className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm"
+                        style={{
+                          transform: wordTooltipsEnabled ? "translateX(20px)" : "translateX(0)",
+                          transition: "transform 180ms ease-out",
+                          willChange: "transform",
+                        }}
+                      />
+                    </span>
+                  </button>
 
                   <div className="h-px bg-warm-100" />
 
