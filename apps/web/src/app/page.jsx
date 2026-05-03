@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { chapters } from "../data/chapters";
 
@@ -139,6 +139,26 @@ export default function QuranProjectPage() {
   // Shape: { surah, verseKey, mode, savedAt } | null
   const [lastSession, setLastSession] = usePersistentState("lastSession", null);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
+
+  // Daily streak — count of consecutive days the user has played at least
+  // one verse. Soft reset on a missed day.
+  // Shape: { count: number, lastDate: 'YYYY-MM-DD' | null }
+  const [streak, setStreak] = usePersistentState("streak", { count: 0, lastDate: null });
+
+  // Per-surah listening history — `{ [surahId]: { count, lastPlayed } }`.
+  // Drives the "Recently played" row + total-coverage stats.
+  const [listenedSurahs, setListenedSurahs] = usePersistentState("listenedSurahs", {});
+
+  // Saved verses — array of `{ surah, surahName, verseKey, text, translation, savedAt }`.
+  // User taps the heart on a verse to add/remove.
+  const [savedVerses, setSavedVerses] = usePersistentState("savedVerses", []);
+
+  // Daily reminder — opt-in nudge surfaced inside the app when the user
+  // opens it after their chosen time and hasn't listened yet today.
+  const [reminderEnabled, setReminderEnabled] = usePersistentState("reminderEnabled", false);
+  const [reminderTime, setReminderTime] = usePersistentState("reminderTime", "07:00");
+  const [showReminderBanner, setShowReminderBanner] = useState(false);
+  const [showBookmarks, setShowBookmarks] = useState(false);
 
   // Single audio element — plays the full surah as one file (no gap problem)
   const audioRef = useRef(null);
@@ -662,6 +682,84 @@ export default function QuranProjectPage() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Daily streak — increments on first verse play of a new local day.
+  // Continues from yesterday → today; resets to 1 on a missed day.
+  useEffect(() => {
+    if (view !== "playing" || !currentAyah) return;
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    if (streak.lastDate === todayStr) return;
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+    const continued = streak.lastDate === yesterdayStr;
+    setStreak({
+      count: continued ? streak.count + 1 : 1,
+      lastDate: todayStr,
+    });
+  }, [currentAyah?.key, view]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Per-surah listening history — increments count + bumps lastPlayed when
+  // a new surah loads. Tracks via a ref so we don't double-count on every
+  // verse update inside the same surah.
+  const lastTrackedSurahRef = useRef(null);
+  useEffect(() => {
+    if (view !== "playing" || !currentAyah || !surahDataRef.current) return;
+    const sid = surahDataRef.current.surah;
+    if (lastTrackedSurahRef.current === sid) return;
+    lastTrackedSurahRef.current = sid;
+    setListenedSurahs((prev) => ({
+      ...prev,
+      [sid]: {
+        count: (prev[sid]?.count || 0) + 1,
+        lastPlayed: Date.now(),
+      },
+    }));
+  }, [currentAyah?.key, view]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Daily reminder check — on mount, if user has reminders on, current
+  // local time is past their chosen reminder time, and they haven't
+  // listened today yet → surface the reminder banner.
+  useEffect(() => {
+    if (!reminderEnabled || !reminderTime) return;
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    if (streak.lastDate === todayStr) return; // already listened today
+    const [h, m] = reminderTime.split(":").map(Number);
+    const reminderToday = new Date(now);
+    reminderToday.setHours(h, m, 0, 0);
+    if (now >= reminderToday) {
+      setShowReminderBanner(true);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Toggle a verse in the saved-verses bookmark list.
+  const toggleSaveCurrentVerse = useCallback(() => {
+    if (!currentAyah || !surahDataRef.current) return;
+    const sid = surahDataRef.current.surah;
+    const key = currentAyah.key;
+    setSavedVerses((prev) => {
+      const existing = prev.find((v) => v.verseKey === key);
+      if (existing) return prev.filter((v) => v.verseKey !== key);
+      return [
+        {
+          surah: sid,
+          surahName: currentAyah.surahName,
+          verseKey: key,
+          text: currentAyah.text,
+          translation: currentAyah.translation,
+          savedAt: Date.now(),
+        },
+        ...prev,
+      ];
+    });
+  }, [currentAyah, setSavedVerses]);
+
+  const isCurrentVerseSaved = useMemo(() => {
+    if (!currentAyah) return false;
+    return savedVerses.some((v) => v.verseKey === currentAyah.key);
+  }, [savedVerses, currentAyah]);
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Helpers
   // ─────────────────────────────────────────────────────────────────────────────
@@ -704,6 +802,18 @@ export default function QuranProjectPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* Streak chip — surfaces only when count > 0. Self reward
+                made visible: each return loads the next trigger. */}
+            {streak.count > 0 && view === "setup" && (
+              <div
+                className="flex items-center gap-1.5 px-3 py-2 bg-white/50 backdrop-blur-md border border-warm-200 rounded-full text-xs font-bold"
+                title={`${streak.count}-day listening streak`}
+                aria-label={`${streak.count}-day listening streak`}
+              >
+                <span aria-hidden="true">🔥</span>
+                <span className="font-mono tabular-nums">{streak.count}</span>
+              </div>
+            )}
             {view !== "setup" && (
               <button
                 onClick={handleEndSession}
@@ -779,6 +889,86 @@ export default function QuranProjectPage() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {/* Daily reminder banner — surfaces only if user has
+                    reminders on, time has passed, and they haven't
+                    listened today. Tap to start the configured session. */}
+                <AnimatePresence>
+                  {showReminderBanner && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8, height: 0 }}
+                      animate={{ opacity: 1, y: 0, height: "auto" }}
+                      exit={{ opacity: 0, y: -8, height: 0 }}
+                      transition={{ duration: 0.3, ease: "easeOut" }}
+                      className="overflow-hidden"
+                    >
+                      <div
+                        className="rounded-2xl p-4 flex items-center justify-between gap-4 shadow-card border"
+                        style={{
+                          backgroundColor: "var(--accent-gold-soft)",
+                          borderColor: "var(--accent-gold)",
+                        }}
+                      >
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-mono uppercase tracking-widest text-warm-700">
+                            Time for your daily listen
+                          </p>
+                          <p className="text-sm font-bold text-warm-900">
+                            Set for {reminderTime}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => setShowReminderBanner(false)}
+                          className="text-xs font-bold uppercase tracking-widest text-warm-700 hover:text-warm-900 transition-colors px-2"
+                          aria-label="Dismiss reminder"
+                        >
+                          <Bi name="x-lg" size={12} />
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Recently played — last 3 surahs from history.
+                    1-tap to re-listen. Hidden if user has no history. */}
+                {(() => {
+                  const recents = Object.entries(listenedSurahs)
+                    .map(([sid, entry]) => ({ sid: Number(sid), ...entry }))
+                    .sort((a, b) => b.lastPlayed - a.lastPlayed)
+                    .slice(0, 3);
+                  if (recents.length === 0) return null;
+                  const totalHeard = Object.keys(listenedSurahs).length;
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-mono uppercase tracking-widest text-warm-400">
+                          Recently played
+                        </p>
+                        <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400">
+                          {totalHeard} / 114 heard
+                        </p>
+                      </div>
+                      <div className="flex gap-2 flex-wrap">
+                        {recents.map((r) => {
+                          const ch = chapters.find((c) => c.id === r.sid);
+                          if (!ch) return null;
+                          return (
+                            <button
+                              key={r.sid}
+                              onClick={() => {
+                                setMode("surah");
+                                setSelectedSurah(r.sid);
+                              }}
+                              className="px-3 py-2 bg-white border border-warm-200 rounded-full text-xs font-bold hover:border-black/30 transition-colors"
+                            >
+                              {ch.name_simple}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <div className="space-y-6">
                   <motion.div
@@ -1315,6 +1505,25 @@ export default function QuranProjectPage() {
                             <div className="h-px w-8" style={{ backgroundColor: "var(--accent-gold-soft)" }} />
                           </div>
 
+                          {/* Save-verse heart — toggles current verse in
+                              the bookmark list. Investment + self reward:
+                              user curates a personal collection. */}
+                          <div className="flex justify-center">
+                            <button
+                              onClick={toggleSaveCurrentVerse}
+                              aria-label={isCurrentVerseSaved ? "Unsave verse" : "Save verse"}
+                              aria-pressed={isCurrentVerseSaved}
+                              className="w-9 h-9 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95"
+                              style={{
+                                color: isCurrentVerseSaved
+                                  ? "var(--accent-gold-deep)"
+                                  : "var(--accent-gold-soft)",
+                              }}
+                            >
+                              <Bi name="heart-fill" size={18} />
+                            </button>
+                          </div>
+
                           {languageMode !== "english" && (
                             <h3
                               ref={arabicRef}
@@ -1552,6 +1761,75 @@ export default function QuranProjectPage() {
                 </div>
 
                 <div className="space-y-5">
+                  {/* Saved verses — opens the bookmarks panel */}
+                  <button
+                    onClick={() => {
+                      setShowSettings(false);
+                      setShowBookmarks(true);
+                    }}
+                    className="w-full flex items-center justify-between gap-4 py-3 text-left"
+                  >
+                    <div className="flex-1">
+                      <p className="text-base font-bold text-warm-900">
+                        Saved verses
+                      </p>
+                      <p className="text-sm text-warm-400 leading-snug mt-1">
+                        {savedVerses.length === 0
+                          ? "Tap the heart on any verse to save it."
+                          : `${savedVerses.length} saved`}
+                      </p>
+                    </div>
+                    <Bi name="chevron-right" size={14} className="text-warm-400" />
+                  </button>
+
+                  <div className="h-px bg-warm-100" />
+
+                  {/* Daily reminder — opt-in nudge at chosen time */}
+                  <div className="py-3 space-y-3">
+                    <button
+                      onClick={() => setReminderEnabled(!reminderEnabled)}
+                      className="w-full flex items-start justify-between gap-4 text-left"
+                    >
+                      <div className="flex-1">
+                        <p className="text-base font-bold text-warm-900">
+                          Daily reminder
+                        </p>
+                        <p className="text-sm text-warm-400 leading-snug mt-1">
+                          Surface a gentle nudge inside the app at your chosen time.
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 mt-1 w-11 h-6 rounded-full relative transition-colors ${
+                          reminderEnabled ? "bg-black" : "bg-warm-200"
+                        }`}
+                      >
+                        <span
+                          className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm"
+                          style={{
+                            transform: reminderEnabled ? "translateX(20px)" : "translateX(0)",
+                            transition: "transform 180ms ease-out",
+                            willChange: "transform",
+                          }}
+                        />
+                      </span>
+                    </button>
+                    {reminderEnabled && (
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-mono uppercase tracking-widest text-warm-400">
+                          Time
+                        </span>
+                        <input
+                          type="time"
+                          value={reminderTime}
+                          onChange={(e) => setReminderTime(e.target.value)}
+                          className="bg-warm-100 rounded-lg px-3 py-2 text-sm font-bold text-warm-900 outline-none border border-warm-200 focus:border-black/30"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="h-px bg-warm-100" />
+
                   {/* Auto-stop on timer end */}
                   <button
                     onClick={() => setAutoStopTimer(!autoStopTimer)}
@@ -1654,6 +1932,90 @@ export default function QuranProjectPage() {
                       </motion.div>
                     )}
                   </AnimatePresence>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Bookmarks panel — list of saved verses with tap-to-remove. */}
+        <AnimatePresence>
+          {showBookmarks && (
+            <motion.div
+              key="bookmarks-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setShowBookmarks(false)}
+              className="fixed inset-0 z-[90] bg-black/30 backdrop-blur-sm flex items-center justify-center p-6"
+            >
+              <motion.div
+                initial={{ opacity: 0, y: 20, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 20, scale: 0.96 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-md max-h-[80vh] flex flex-col bg-white border border-warm-200 rounded-3xl shadow-overlay overflow-hidden"
+              >
+                <div className="flex items-center justify-between p-6 pb-4 shrink-0">
+                  <div>
+                    <h3 className="text-2xl font-bold font-resolide tracking-tight">
+                      Saved verses
+                    </h3>
+                    <p className="text-xs font-mono uppercase tracking-widest text-warm-400 mt-1">
+                      {savedVerses.length} {savedVerses.length === 1 ? "verse" : "verses"}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowBookmarks(false)}
+                    aria-label="Close bookmarks"
+                    className="w-9 h-9 rounded-full border border-warm-200 flex items-center justify-center text-warm-500 hover:bg-black hover:text-white hover:border-black transition-all"
+                  >
+                    <Bi name="x-lg" size={14} />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-3">
+                  {savedVerses.length === 0 ? (
+                    <div className="text-center py-12">
+                      <p className="text-sm text-warm-400 leading-relaxed">
+                        Tap the heart on any verse during playback to save it.
+                      </p>
+                    </div>
+                  ) : (
+                    savedVerses.map((v) => (
+                      <div
+                        key={v.verseKey + ":" + v.savedAt}
+                        className="bg-warm-50 border border-warm-200 rounded-2xl p-4 space-y-2"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400">
+                            {v.surahName} • {v.verseKey}
+                          </p>
+                          <button
+                            onClick={() =>
+                              setSavedVerses((prev) =>
+                                prev.filter((x) => x.verseKey !== v.verseKey),
+                              )
+                            }
+                            aria-label={`Remove verse ${v.verseKey}`}
+                            className="text-warm-400 hover:text-warm-700 transition-colors shrink-0"
+                          >
+                            <Bi name="x-lg" size={10} />
+                          </button>
+                        </div>
+                        <p className="font-serif text-lg leading-snug text-right" dir="rtl">
+                          {v.text}
+                        </p>
+                        {v.translation && (
+                          <p className="text-sm text-warm-500 italic leading-relaxed">
+                            {v.translation}
+                          </p>
+                        )}
+                      </div>
+                    ))
+                  )}
                 </div>
               </motion.div>
             </motion.div>
