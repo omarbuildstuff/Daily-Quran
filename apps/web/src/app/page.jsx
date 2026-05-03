@@ -1554,17 +1554,25 @@ export default function QuranProjectPage() {
                                           : "transparent",
                                         color: isActive ? "#fff" : "inherit",
                                       }}
-                                      onMouseEnter={
+                                      onPointerEnter={
                                         tooltipsOn
-                                          ? () => setHoveredWordPos(w.position)
+                                          ? (e) => {
+                                              // Skip hover-set on touch — taps trigger
+                                              // pointerenter then pointerleave in quick
+                                              // succession on mobile, hiding the tooltip.
+                                              if (e.pointerType === "touch") return;
+                                              setHoveredWordPos(w.position);
+                                            }
                                           : undefined
                                       }
-                                      onMouseLeave={
+                                      onPointerLeave={
                                         tooltipsOn
-                                          ? () =>
+                                          ? (e) => {
+                                              if (e.pointerType === "touch") return;
                                               setHoveredWordPos((prev) =>
                                                 prev === w.position ? null : prev,
-                                              )
+                                              );
+                                            }
                                           : undefined
                                       }
                                       onClick={
