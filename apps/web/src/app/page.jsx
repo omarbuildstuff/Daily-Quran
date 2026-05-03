@@ -1465,7 +1465,7 @@ export default function QuranProjectPage() {
                           {languageMode !== "arabic" && (
                             <p
                               ref={englishRef}
-                              className="text-xl md:text-3xl text-warm-500 leading-relaxed italic max-w-2xl mx-auto font-normal scroll-mt-32"
+                              className="font-fraunces text-xl md:text-3xl text-warm-500 leading-relaxed italic max-w-2xl mx-auto font-normal scroll-mt-32"
                             >
                               {currentAyah.translation}
                             </p>
@@ -1991,7 +1991,7 @@ export default function QuranProjectPage() {
       </div>
 
       <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&family=Inter:wght@300;400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&family=Inter:wght@300;400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&display=swap');
 
         @font-face {
           font-family: 'Arsenica';
@@ -2017,6 +2017,11 @@ export default function QuranProjectPage() {
 
         .font-resolide {
           font-family: 'Arsenica', 'Resolide Serif', 'Playfair Display', serif;
+        }
+
+        .font-fraunces {
+          font-family: 'Fraunces', 'Playfair Display', Georgia, serif;
+          font-optical-sizing: auto;
         }
 
         :root {
