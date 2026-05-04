@@ -1199,16 +1199,31 @@ export default function QuranProjectPage() {
                                         Start verse
                                       </p>
                                       <input
-                                        type="number"
+                                        type="text"
                                         inputMode="numeric"
-                                        min="1"
-                                        max={versesCount}
+                                        pattern="[0-9]*"
                                         value={memStartVerse}
-                                        onFocus={(e) => e.currentTarget.select()}
+                                        onFocus={(e) => {
+                                          // setTimeout works around iOS Safari
+                                          // quirk where .select() during the focus
+                                          // event is overridden by the tap.
+                                          const el = e.currentTarget;
+                                          setTimeout(() => el.select(), 0);
+                                        }}
                                         onChange={(e) => {
-                                          const v = clamp(e.target.value);
+                                          const raw = e.target.value.replace(/\D/g, "");
+                                          if (raw === "") {
+                                            setMemStartVerse("");
+                                            return;
+                                          }
+                                          const v = clamp(raw);
                                           setMemStartVerse(v);
                                           if (v > Number(memEndVerse)) setMemEndVerse(v);
+                                        }}
+                                        onBlur={() => {
+                                          if (!memStartVerse || Number(memStartVerse) < 1) {
+                                            setMemStartVerse(1);
+                                          }
                                         }}
                                         className="w-full bg-transparent outline-none text-lg font-bold text-warm-700"
                                       />
@@ -1221,15 +1236,28 @@ export default function QuranProjectPage() {
                                         End verse
                                       </p>
                                       <input
-                                        type="number"
+                                        type="text"
                                         inputMode="numeric"
-                                        min={memStartVerse}
-                                        max={versesCount}
+                                        pattern="[0-9]*"
                                         value={memEndVerse}
-                                        onFocus={(e) => e.currentTarget.select()}
+                                        onFocus={(e) => {
+                                          const el = e.currentTarget;
+                                          setTimeout(() => el.select(), 0);
+                                        }}
                                         onChange={(e) => {
-                                          const v = clamp(e.target.value);
-                                          setMemEndVerse(Math.max(v, Number(memStartVerse)));
+                                          const raw = e.target.value.replace(/\D/g, "");
+                                          if (raw === "") {
+                                            setMemEndVerse("");
+                                            return;
+                                          }
+                                          const v = clamp(raw);
+                                          setMemEndVerse(v);
+                                        }}
+                                        onBlur={() => {
+                                          const n = Number(memEndVerse);
+                                          if (!memEndVerse || n < Number(memStartVerse)) {
+                                            setMemEndVerse(Number(memStartVerse));
+                                          }
                                         }}
                                         className="w-full bg-transparent outline-none text-lg font-bold text-warm-700"
                                       />
