@@ -1200,9 +1200,11 @@ export default function QuranProjectPage() {
                                       </p>
                                       <input
                                         type="number"
+                                        inputMode="numeric"
                                         min="1"
                                         max={versesCount}
                                         value={memStartVerse}
+                                        onFocus={(e) => e.currentTarget.select()}
                                         onChange={(e) => {
                                           const v = clamp(e.target.value);
                                           setMemStartVerse(v);
@@ -1220,9 +1222,11 @@ export default function QuranProjectPage() {
                                       </p>
                                       <input
                                         type="number"
+                                        inputMode="numeric"
                                         min={memStartVerse}
                                         max={versesCount}
                                         value={memEndVerse}
+                                        onFocus={(e) => e.currentTarget.select()}
                                         onChange={(e) => {
                                           const v = clamp(e.target.value);
                                           setMemEndVerse(Math.max(v, Number(memStartVerse)));
