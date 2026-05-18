@@ -190,6 +190,7 @@ export default function QuranProjectPage() {
   const englishRef = useRef(null);
 
   const timerRef = useRef(null);
+  const shownTodayRef = useRef(null);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Fetch full surah: audio URL + verse timestamps + per-verse text + translations
@@ -780,21 +781,56 @@ export default function QuranProjectPage() {
     }));
   }, [currentAyah?.key, view]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Daily reminder check — on mount, if user has reminders on, current
-  // local time is past their chosen reminder time, and they haven't
-  // listened today yet → surface the reminder banner.
+  // Register service worker for push notifications.
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  }, []);
+
+  // Daily reminder — fires a real OS notification (and in-app banner) when
+  // the user hasn't listened yet and their chosen time has arrived.
+  // Checks every minute so it fires even if the app was already open.
   useEffect(() => {
     if (!reminderEnabled || !reminderTime) return;
-    const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
-    if (streak.lastDate === todayStr) return; // already listened today
-    const [h, m] = reminderTime.split(":").map(Number);
-    const reminderToday = new Date(now);
-    reminderToday.setHours(h, m, 0, 0);
-    if (now >= reminderToday) {
+
+    const check = async () => {
+      const now = new Date();
+      const todayStr = now.toISOString().slice(0, 10);
+      if (streak.lastDate === todayStr) return; // already listened today
+      if (shownTodayRef.current === todayStr) return; // already notified today
+
+      const [h, m] = reminderTime.split(":").map(Number);
+      const target = new Date(now);
+      target.setHours(h, m, 0, 0);
+      if (now < target) return; // not yet time
+
+      shownTodayRef.current = todayStr;
       setShowReminderBanner(true);
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          reg.showNotification("Time for your daily Quran 🤲", {
+            body: "You haven't listened today yet. Take a few minutes.",
+            icon: "/android-chrome-192x192.png",
+            badge: "/android-chrome-192x192.png",
+            tag: "daily-reminder",
+            renotify: false,
+          });
+        } catch {
+          new Notification("Time for your daily Quran 🤲", {
+            body: "You haven't listened today yet.",
+            icon: "/android-chrome-192x192.png",
+          });
+        }
+      }
+    };
+
+    check();
+    const id = setInterval(check, 60_000);
+    return () => clearInterval(id);
+  }, [reminderEnabled, reminderTime, streak.lastDate]);
 
   // Toggle a verse in the saved-verses bookmark list.
   const toggleSaveCurrentVerse = useCallback(() => {
@@ -1939,7 +1975,13 @@ export default function QuranProjectPage() {
                   {/* Daily reminder — opt-in nudge at chosen time */}
                   <div className="py-3 space-y-3">
                     <button
-                      onClick={() => setReminderEnabled(!reminderEnabled)}
+                      onClick={async () => {
+                        const next = !reminderEnabled;
+                        setReminderEnabled(next);
+                        if (next && typeof Notification !== "undefined" && Notification.permission === "default") {
+                          await Notification.requestPermission();
+                        }
+                      }}
                       className="w-full flex items-start justify-between gap-4 text-left"
                     >
                       <div className="flex-1">
@@ -1947,7 +1989,7 @@ export default function QuranProjectPage() {
                           Daily reminder
                         </p>
                         <p className="text-sm text-warm-400 leading-snug mt-1">
-                          Surface a gentle nudge inside the app at your chosen time.
+                          Get a notification at your chosen time if you haven't listened yet.
                         </p>
                       </div>
                       <span
