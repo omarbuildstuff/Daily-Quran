@@ -193,14 +193,14 @@ enum SVGPath {
 }
 
 /// SwiftUI shape for a multi-subpath SVG (16×16 viewBox), even-odd filled.
+/// One Bootstrap `<path>` (16×16 viewBox). Caller fills it even-odd, exactly
+/// like the web's per-path `fillRule="evenodd"`.
 struct SVGShape: Shape {
-    let subpaths: [String]
+    let d: String
     func path(in rect: CGRect) -> Path {
-        let combined = CGMutablePath()
-        for d in subpaths { combined.addPath(SVGPath.scan(d)) }
         let s = min(rect.width, rect.height) / 16
         var t = CGAffineTransform(scaleX: s, y: s)
-        let scaled = combined.copy(using: &t) ?? combined
+        let scaled = SVGPath.scan(d).copy(using: &t) ?? SVGPath.scan(d)
         return Path(scaled)
     }
 }

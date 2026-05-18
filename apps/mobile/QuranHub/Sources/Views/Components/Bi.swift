@@ -32,9 +32,14 @@ struct Bi: View {
 
     var body: some View {
         if let d = BIPaths.map[name] {
-            SVGShape(subpaths: d.components(separatedBy: "|"))
-                .frame(width: size, height: size)
-                .clipped()
+            ZStack {
+                ForEach(Array(d.components(separatedBy: "|").enumerated()), id: \.offset) { _, sub in
+                    SVGShape(d: sub)
+                        .fill(ForegroundStyle(), style: FillStyle(eoFill: true, antialiased: true))
+                }
+            }
+            .frame(width: size, height: size)
+            .clipped()
         }
     }
 }
