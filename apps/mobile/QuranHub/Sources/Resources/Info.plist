@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Quran Hub</string>
+	<key>CFBundleName</key>
+	<string>QuranHub</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
+	<key>UIUserInterfaceStyle</key>
+	<string>Light</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>thmanyahserifdisplay-Light.otf</string>
+		<string>thmanyahserifdisplay-Regular.otf</string>
+		<string>thmanyahserifdisplay-Medium.otf</string>
+		<string>thmanyahserifdisplay-Bold.otf</string>
+		<string>thmanyahserifdisplay-Black.otf</string>
+		<string>arsenica-regular.ttf</string>
+		<string>arsenica-bold.ttf</string>
+		<string>resolide-serif.otf</string>
+		<string>Inter-300.ttf</string>
+		<string>Inter-400.ttf</string>
+		<string>Inter-500.ttf</string>
+		<string>Inter-600.ttf</string>
+		<string>Inter-700.ttf</string>
+		<string>PlayfairDisplay-400.ttf</string>
+		<string>PlayfairDisplay-400i.ttf</string>
+		<string>PlayfairDisplay-700.ttf</string>
+		<string>PlayfairDisplay-700i.ttf</string>
+	</array>
+</dict>
+</plist>
