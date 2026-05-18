@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { chapters } from "../data/chapters";
+import { useElapsedStore } from "./playbackStore";
 
 // Bootstrap Icons — inline SVG paths, kept tiny so we don't pull in the full library.
 const BI_PATHS = {
@@ -92,38 +93,155 @@ const getGreeting = () => {
 const STORAGE_PREFIX = "quranaday.v1.";
 const usePersistentState = (key, defaultValue) => {
   const storageKey = STORAGE_PREFIX + key;
-  const [value, setValue] = useState(() => {
-    if (typeof window === "undefined") return defaultValue;
+  // Always start from the default so the server-rendered HTML and the first
+  // client render match — this is what lets the app SSR. The stored value is
+  // loaded in an effect after hydration.
+  const [value, setValue] = useState(defaultValue);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
     try {
       const raw = window.localStorage.getItem(storageKey);
-      if (raw === null) return defaultValue;
-      return JSON.parse(raw);
+      if (raw !== null) setValue(JSON.parse(raw));
     } catch {
-      return defaultValue;
+      // Ignore corrupt / privacy-mode reads — keep the default
     }
-  });
+    setHydrated(true);
+  }, [storageKey]);
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    // Don't write until the post-hydration load has run, otherwise the default
+    // would clobber the stored value on first mount.
+    if (!hydrated) return;
     try {
       window.localStorage.setItem(storageKey, JSON.stringify(value));
     } catch {
       // Ignore quota / privacy-mode errors
     }
-  }, [storageKey, value]);
+  }, [storageKey, value, hydrated]);
   return [value, setValue];
 };
 
+const formatTime = (seconds) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+};
+
+// Time/verse readout. Subscribes to the elapsed store directly so the
+// once-a-second update re-renders only this node, not the player tree.
+const ElapsedReadout = React.memo(function ElapsedReadout({
+  mode,
+  surahTimerEnabled,
+  currentAyah,
+  selectedSurah,
+  targetDuration,
+}) {
+  const elapsed = useElapsedStore((s) => s.elapsed);
+  return (
+    <div className="flex-1 text-right font-mono tracking-tighter text-lg font-bold">
+      {mode === "surah" && !surahTimerEnabled && currentAyah ? (
+        <span>
+          {currentAyah.key.split(":")[1]}
+          <span className="text-warm-400"> / </span>
+          {chapters.find((c) => c.id === selectedSurah)?.verses_count || "?"}
+          <span className="block text-[10px] uppercase tracking-widest text-warm-400 font-bold mt-0.5">
+            Verse
+          </span>
+        </span>
+      ) : (
+        <span>
+          {formatTime(elapsed)}
+          <span className="text-warm-400"> / </span>
+          {formatTime(targetDuration)}
+        </span>
+      )}
+    </div>
+  );
+});
+
+// Progress bar. Same rationale — subscribes to elapsed itself.
+const ProgressTrack = React.memo(function ProgressTrack({
+  mode,
+  surahTimerEnabled,
+  currentAyah,
+  selectedSurah,
+  targetDuration,
+  surahDataRef,
+  audioRef,
+}) {
+  const elapsed = useElapsedStore((s) => s.elapsed);
+  const surahMode = mode === "surah" && !surahTimerEnabled && currentAyah;
+  const versesCount =
+    chapters.find((c) => c.id === selectedSurah)?.verses_count || 1;
+  const ratio = surahMode
+    ? Number(currentAyah.key.split(":")[1]) / versesCount
+    : Math.min(1, elapsed / targetDuration);
+  const handleScrub = (e) => {
+    if (!surahMode) return;
+    const sd = surahDataRef.current;
+    const el = audioRef.current;
+    if (!sd || !el) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX ?? e.touches?.[0]?.clientX ?? 0) - rect.left;
+    const r = Math.max(0, Math.min(1, x / rect.width));
+    const targetVerseIdx = Math.min(
+      sd.verses.length - 1,
+      Math.floor(r * sd.verses.length),
+    );
+    const target = sd.verses[targetVerseIdx];
+    if (target) el.currentTime = target.startMs / 1000;
+  };
+  return (
+    <div className="max-w-screen-sm mx-auto mt-4 px-8">
+      <div
+        role={surahMode ? "slider" : undefined}
+        aria-label={surahMode ? "Seek verse" : undefined}
+        aria-valuemin={surahMode ? 1 : undefined}
+        aria-valuemax={surahMode ? versesCount : undefined}
+        aria-valuenow={surahMode ? Number(currentAyah.key.split(":")[1]) : undefined}
+        tabIndex={surahMode ? 0 : -1}
+        onClick={handleScrub}
+        className={`h-3 -my-1 flex items-center w-full ${
+          surahMode ? "cursor-pointer" : "cursor-default"
+        }`}
+      >
+        <div className="h-1 w-full bg-warm-100 rounded-full overflow-hidden pointer-events-none">
+          <div
+            className="h-full rounded-full origin-left"
+            style={{
+              background:
+                "linear-gradient(90deg, var(--accent-gold) 0%, var(--accent-gold-deep) 100%)",
+              transform: `scaleX(${ratio})`,
+              transformOrigin: "left center",
+              transition: "transform 1s linear",
+              willChange: "transform",
+              width: "100%",
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+});
+
 export default function QuranProjectPage() {
   const [view, setView] = useState("setup"); // 'setup' | 'playing' | 'finished'
+  // Time-of-day greeting depends on the client clock, so it's resolved after
+  // mount. A fixed default keeps SSR and the first client render identical.
+  const [greeting, setGreeting] = useState({ line1: "Bismillah.", line2: "Let's begin." });
+  useEffect(() => {
+    setGreeting(getGreeting());
+  }, []);
   const [reciterId, setReciterId] = usePersistentState("reciterId", 7);
   const [targetDuration, setTargetDuration] = usePersistentState("targetDuration", 300);
   const [currentAyah, setCurrentAyah] = useState(null);
-  // Active word index (1-based) for karaoke-style highlight on the Arabic verse.
-  const [currentWordIdx, setCurrentWordIdx] = useState(0);
+  // Active word index (1-based) for the karaoke highlight is NOT React state:
+  // it ticks several times a second during recitation and would re-render this
+  // whole tree. It's applied imperatively to the rendered word spans instead
+  // (see applyActiveWord). Elapsed seconds live in useElapsedStore for the
+  // same reason — see playbackStore.js.
   // Word the user is hovering / tapping on — drives the translation tooltip.
   const [hoveredWordPos, setHoveredWordPos] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [elapsedTime, setElapsedTime] = useState(0);
   const [startTime, setStartTime] = useState(0);
   const [loading, setLoading] = useState(false);
   const [customMinutes, setCustomMinutes] = useState("");
@@ -192,6 +310,25 @@ export default function QuranProjectPage() {
   const timerRef = useRef(null);
   const shownTodayRef = useRef(null);
   const rafPendingRef = useRef(false);
+
+  // Karaoke highlight, applied imperatively so the per-word tick never goes
+  // through React. `arabicRef` is the verse <h3>; word spans carry
+  // data-wordpos. Reading `enabled` from a ref keeps applyActiveWord stable
+  // (empty deps) and callable from the rAF-throttled timeupdate handler.
+  const karaokeStateRef = useRef({ enabled: false });
+  const activeWordRef = useRef(0);
+  const applyActiveWord = useCallback((idx) => {
+    const root = arabicRef.current;
+    if (!root || !karaokeStateRef.current.enabled) return;
+    if (activeWordRef.current === idx) return;
+    activeWordRef.current = idx;
+    const prev = root.querySelector(".kw-active");
+    if (prev) prev.classList.remove("kw-active");
+    if (idx > 0) {
+      const el = root.querySelector(`[data-wordpos="${idx}"]`);
+      if (el) el.classList.add("kw-active");
+    }
+  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Fetch full surah: audio URL + verse timestamps + per-verse text + translations
@@ -303,11 +440,11 @@ export default function QuranProjectPage() {
         ([, s, e]) => currentMs >= s && currentMs < e,
       );
       const idx = seg ? seg[0] : 0;
-      setCurrentWordIdx((prev) => (prev === idx ? prev : idx));
+      applyActiveWord(idx);
     } else {
-      setCurrentWordIdx(0);
+      applyActiveWord(0);
     }
-  }, []);
+  }, [applyActiveWord]);
 
   const handleTimeUpdate = useCallback(() => {
     if (rafPendingRef.current) return;
@@ -530,7 +667,7 @@ export default function QuranProjectPage() {
       startSurah = pickNextRandomSurah();
     }
 
-    setElapsedTime(0);
+    useElapsedStore.getState().reset();
     setStartTime(Date.now());
     setView("playing");
     setIsPlaying(true);
@@ -626,7 +763,7 @@ export default function QuranProjectPage() {
     surahDataRef.current = null;
     nextSurahDataRef.current = null;
     playedSurahsRef.current = [];
-    setElapsedTime(0);
+    useElapsedStore.getState().reset();
     setStartTime(Date.now());
     setView("playing");
     setIsPlaying(true);
@@ -677,13 +814,29 @@ export default function QuranProjectPage() {
   useEffect(() => {
     if (view === "playing" && isPlaying) {
       timerRef.current = setInterval(() => {
-        setElapsedTime((prev) => prev + 1);
+        // Ticks the external store, not component state — does not re-render
+        // this tree, only the elapsed readout/progress leaves.
+        useElapsedStore.getState().tick();
       }, 1000);
     } else {
       clearInterval(timerRef.current);
     }
     return () => clearInterval(timerRef.current);
   }, [view, isPlaying]);
+
+  // Keep the imperative karaoke in sync with the toggle. When turned off,
+  // clear any lingering highlight. When the verse changes, the spans remount
+  // fresh, so just reset the tracked index — the next timeupdate re-applies.
+  useEffect(() => {
+    karaokeStateRef.current.enabled = karaokeEnabled;
+    if (!karaokeEnabled) {
+      const prev = arabicRef.current?.querySelector(".kw-active");
+      if (prev) prev.classList.remove("kw-active");
+    }
+  }, [karaokeEnabled]);
+  useEffect(() => {
+    activeWordRef.current = 0;
+  }, [currentAyah?.key]);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Auto-scroll to the focused language after a new verse has finished entering.
@@ -866,16 +1019,6 @@ export default function QuranProjectPage() {
   }, [savedVerses, currentAyah]);
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
-
-  // ─────────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -910,7 +1053,7 @@ export default function QuranProjectPage() {
             {view !== "setup" && (
               <button
                 onClick={handleEndSession}
-                className="px-4 py-2 bg-white/80 border border-warm-200 rounded-full text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition-all duration-300"
+                className="px-4 py-2 bg-white/80 border border-warm-200 rounded-full text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition duration-300"
               >
                 End Session
               </button>
@@ -919,7 +1062,7 @@ export default function QuranProjectPage() {
               <button
                 onClick={() => setShowSettings(true)}
                 aria-label="Settings"
-                className="w-10 h-10 bg-white/80 border border-warm-200 rounded-full flex items-center justify-center text-warm-500 hover:bg-black hover:text-white hover:border-black transition-all duration-300"
+                className="w-10 h-10 bg-white/80 border border-warm-200 rounded-full flex items-center justify-center text-warm-500 hover:bg-black hover:text-white hover:border-black transition duration-300"
               >
                 <Bi name="gear-wide" size={16} />
               </button>
@@ -1035,8 +1178,8 @@ export default function QuranProjectPage() {
                     }}
                   />
                   <h2 className="font-resolide text-5xl md:text-7xl font-bold leading-[1.1] tracking-tight">
-                    {getGreeting().line1} <br />
-                    {getGreeting().line2}
+                    {greeting.line1} <br />
+                    {greeting.line2}
                   </h2>
                   <p className="text-xl text-warm-500 max-w-sm leading-relaxed font-normal">
                     {mode === "surah"
@@ -1050,7 +1193,7 @@ export default function QuranProjectPage() {
                   <div className="flex gap-1 bg-warm-100 rounded-2xl p-1">
                     <button
                       onClick={() => setMode("random")}
-                      className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all duration-300 ${
+                      className={`flex-1 py-3 rounded-xl text-sm font-bold transition duration-300 ${
                         mode === "random"
                           ? "bg-white text-black shadow-sm"
                           : "text-warm-400 hover:text-warm-500"
@@ -1060,7 +1203,7 @@ export default function QuranProjectPage() {
                     </button>
                     <button
                       onClick={() => setMode("surah")}
-                      className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all duration-300 ${
+                      className={`flex-1 py-3 rounded-xl text-sm font-bold transition duration-300 ${
                         mode === "surah"
                           ? "bg-white text-black shadow-sm"
                           : "text-warm-400 hover:text-warm-500"
@@ -1150,7 +1293,7 @@ export default function QuranProjectPage() {
                                         setTargetDuration(d.value);
                                         setCustomMinutes("");
                                       }}
-                                      className={`relative flex-1 py-4 rounded-2xl text-lg font-bold transition-all duration-300 border ${
+                                      className={`relative flex-1 py-4 rounded-2xl text-lg font-bold transition duration-300 border ${
                                         targetDuration === d.value && !customMinutes
                                           ? "bg-black text-white border-black shadow-overlay"
                                           : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
@@ -1161,7 +1304,7 @@ export default function QuranProjectPage() {
                                   ))}
                                 </div>
                                 <div
-                                  className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition-all duration-300 ${
+                                  className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition duration-300 ${
                                     customMinutes
                                       ? "bg-black border-black shadow-overlay"
                                       : "bg-white border-warm-200 hover:border-black/20"
@@ -1366,7 +1509,7 @@ export default function QuranProjectPage() {
                                 setTargetDuration(d.value);
                                 setCustomMinutes("");
                               }}
-                              className={`relative flex-1 py-4 rounded-2xl text-lg font-bold transition-all duration-300 border ${
+                              className={`relative flex-1 py-4 rounded-2xl text-lg font-bold transition duration-300 border ${
                                 targetDuration === d.value && !customMinutes
                                   ? "bg-black text-white border-black shadow-overlay"
                                   : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
@@ -1377,7 +1520,7 @@ export default function QuranProjectPage() {
                           ))}
                         </div>
                         <div
-                          className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition-all duration-300 ${
+                          className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition duration-300 ${
                             customMinutes
                               ? "bg-black border-black shadow-overlay"
                               : "bg-white border-warm-200 hover:border-black/20"
@@ -1452,7 +1595,7 @@ export default function QuranProjectPage() {
                                   <button
                                     key={m.id}
                                     onClick={() => setSelectedMood(m.id)}
-                                    className={`flex items-center gap-2 py-3 px-4 rounded-2xl text-sm font-bold transition-all duration-300 border text-left ${
+                                    className={`flex items-center gap-2 py-3 px-4 rounded-2xl text-sm font-bold transition duration-300 border text-left ${
                                       selectedMood === m.id
                                         ? "bg-black text-white border-black shadow-overlay"
                                         : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
@@ -1481,7 +1624,7 @@ export default function QuranProjectPage() {
                       <select
                         value={reciterId}
                         onChange={(e) => setReciterId(Number(e.target.value))}
-                        className="w-full bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-medium appearance-none cursor-pointer focus:outline-none focus:ring-4 focus:ring-black/5 transition-all"
+                        className="w-full bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-medium appearance-none cursor-pointer focus:outline-none focus:ring-4 focus:ring-black/5 transition"
                       >
                         {RECITERS.map((r) => (
                           <option key={r.id} value={r.id}>
@@ -1498,7 +1641,7 @@ export default function QuranProjectPage() {
 
                 <button
                   onClick={startPlayback}
-                  className="w-full bg-black text-white rounded-2xl py-6 text-xl font-bold shadow-dropdown hover:shadow-black/40 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-3 group"
+                  className="w-full bg-black text-white rounded-2xl py-6 text-xl font-bold shadow-dropdown hover:shadow-black/40 hover:-translate-y-0.5 active:translate-y-0 transition flex items-center justify-center gap-3 group"
                 >
                   Start Listening
                   <Bi
@@ -1594,6 +1737,12 @@ export default function QuranProjectPage() {
                               ref={arabicRef}
                               className="font-thmanyah text-4xl md:text-6xl leading-[1.7] md:leading-[1.7] text-center scroll-mt-32"
                               dir="rtl"
+                              style={{
+                                "--kw-color":
+                                  karaokeColor === "green"
+                                    ? "rgb(0, 188, 109)"
+                                    : "var(--accent-gold-deep)",
+                              }}
                             >
                               {(() => {
                                 // Prefer the per-word data from the API
@@ -1612,26 +1761,15 @@ export default function QuranProjectPage() {
                                           translation: "",
                                           transliteration: "",
                                         }));
-                                const KARAOKE_COLOR =
-                                  karaokeColor === "green"
-                                    ? "rgb(0, 188, 109)"
-                                    : "var(--accent-gold-deep)";
                                 return words.map((w) => {
-                                  const isActive =
-                                    karaokeEnabled && currentWordIdx === w.position;
                                   const isHovered =
                                     wordTooltipsEnabled && hoveredWordPos === w.position;
                                   const tooltipsOn = wordTooltipsEnabled;
                                   return (
                                     <span
                                       key={w.position}
+                                      data-wordpos={w.position}
                                       className={`relative inline-block px-1.5 py-0.5 mx-0.5 rounded-md transition-colors duration-150 ${tooltipsOn ? "cursor-help" : "cursor-default"}`}
-                                      style={{
-                                        backgroundColor: isActive
-                                          ? KARAOKE_COLOR
-                                          : "transparent",
-                                        color: isActive ? "#fff" : "inherit",
-                                      }}
                                       onPointerEnter={
                                         tooltipsOn
                                           ? (e) => {
@@ -1711,7 +1849,7 @@ export default function QuranProjectPage() {
                   <div className="max-w-screen-sm mx-auto bg-white/95 border border-warm-200 rounded-3xl px-6 py-5 shadow-overlay flex items-center justify-between gap-4">
                     <button
                       onClick={() => setIsPlaying(!isPlaying)}
-                      className="w-14 h-14 bg-black rounded-2xl flex items-center justify-center text-white shadow-card hover:scale-105 active:scale-95 transition-all shrink-0"
+                      className="w-14 h-14 bg-black rounded-2xl flex items-center justify-center text-white shadow-card hover:scale-105 active:scale-95 transition shrink-0"
                       aria-label={isPlaying ? "Pause" : "Play"}
                     >
                       {isPlaying ? (
@@ -1729,7 +1867,7 @@ export default function QuranProjectPage() {
                         onClick={toggleSaveCurrentVerse}
                         aria-label={isCurrentVerseSaved ? "Unsave verse" : "Save verse"}
                         aria-pressed={isCurrentVerseSaved}
-                        className="w-10 h-10 flex items-center justify-center transition-all hover:scale-110 active:scale-90 shrink-0"
+                        className="w-10 h-10 flex items-center justify-center transition hover:scale-110 active:scale-90 shrink-0"
                         style={{
                           color: isCurrentVerseSaved ? "#e0245e" : "#c8c8c2",
                         }}
@@ -1741,87 +1879,29 @@ export default function QuranProjectPage() {
                     {/* Unified time / verse readout — single source of truth.
                         Surah mode without timer shows "verse N / total"; every
                         other mode shows "elapsed / total" like a standard
-                        media player. Drops the dual PROGRESS / DURATION labels. */}
-                    <div className="flex-1 text-right font-mono tracking-tighter text-lg font-bold">
-                      {mode === "surah" && !surahTimerEnabled && currentAyah ? (
-                        <span>
-                          {currentAyah.key.split(":")[1]}
-                          <span className="text-warm-400"> / </span>
-                          {chapters.find((c) => c.id === selectedSurah)?.verses_count || "?"}
-                          <span className="block text-[10px] uppercase tracking-widest text-warm-400 font-bold mt-0.5">
-                            Verse
-                          </span>
-                        </span>
-                      ) : (
-                        <span>
-                          {formatTime(elapsedTime)}
-                          <span className="text-warm-400"> / </span>
-                          {formatTime(targetDuration)}
-                        </span>
-                      )}
-                    </div>
+                        media player. Lives in its own leaf so the per-second
+                        tick doesn't re-render the player tree. */}
+                    <ElapsedReadout
+                      mode={mode}
+                      surahTimerEnabled={surahTimerEnabled}
+                      currentAyah={currentAyah}
+                      selectedSurah={selectedSurah}
+                      targetDuration={targetDuration}
+                    />
                   </div>
 
                   {/* Progress bar — scrubbable in surah mode (the position is
                       verse-based and seeking has a clear meaning); read-only in
-                      timer mode (position is wall-clock elapsed). The cursor
-                      hint changes accordingly to avoid the false-affordance trap. */}
-                  <div className="max-w-screen-sm mx-auto mt-4 px-8">
-                    {(() => {
-                      const surahMode = mode === "surah" && !surahTimerEnabled && currentAyah;
-                      const versesCount =
-                        chapters.find((c) => c.id === selectedSurah)?.verses_count || 1;
-                      const ratio = surahMode
-                        ? Number(currentAyah.key.split(":")[1]) / versesCount
-                        : Math.min(1, elapsedTime / targetDuration);
-                      const handleScrub = (e) => {
-                        if (!surahMode) return;
-                        const sd = surahDataRef.current;
-                        const el = audioRef.current;
-                        if (!sd || !el) return;
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        const x = (e.clientX ?? e.touches?.[0]?.clientX ?? 0) - rect.left;
-                        const r = Math.max(0, Math.min(1, x / rect.width));
-                        const targetVerseIdx = Math.min(
-                          sd.verses.length - 1,
-                          Math.floor(r * sd.verses.length),
-                        );
-                        const target = sd.verses[targetVerseIdx];
-                        if (target) el.currentTime = target.startMs / 1000;
-                      };
-                      return (
-                        <div
-                          role={surahMode ? "slider" : undefined}
-                          aria-label={surahMode ? "Seek verse" : undefined}
-                          aria-valuemin={surahMode ? 1 : undefined}
-                          aria-valuemax={surahMode ? versesCount : undefined}
-                          aria-valuenow={
-                            surahMode ? Number(currentAyah.key.split(":")[1]) : undefined
-                          }
-                          tabIndex={surahMode ? 0 : -1}
-                          onClick={handleScrub}
-                          className={`h-3 -my-1 flex items-center w-full ${
-                            surahMode ? "cursor-pointer" : "cursor-default"
-                          }`}
-                        >
-                          <div className="h-1 w-full bg-warm-100 rounded-full overflow-hidden pointer-events-none">
-                            <div
-                              className="h-full rounded-full origin-left"
-                              style={{
-                                background:
-                                  "linear-gradient(90deg, var(--accent-gold) 0%, var(--accent-gold-deep) 100%)",
-                                transform: `scaleX(${ratio})`,
-                                transformOrigin: "left center",
-                                transition: "transform 1s linear",
-                                willChange: "transform",
-                                width: "100%",
-                              }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
+                      timer mode (position is wall-clock elapsed). */}
+                  <ProgressTrack
+                    mode={mode}
+                    surahTimerEnabled={surahTimerEnabled}
+                    currentAyah={currentAyah}
+                    selectedSurah={selectedSurah}
+                    targetDuration={targetDuration}
+                    surahDataRef={surahDataRef}
+                    audioRef={audioRef}
+                  />
                 </div>
               </motion.div>
             )}
@@ -1892,7 +1972,7 @@ export default function QuranProjectPage() {
                 <div className="flex flex-col gap-4 pt-12">
                   <button
                     onClick={() => setView("setup")}
-                    className="bg-black text-white rounded-2xl py-6 text-xl font-bold shadow-overlay hover:scale-[1.02] active:scale-98 transition-all"
+                    className="bg-black text-white rounded-2xl py-6 text-xl font-bold shadow-overlay hover:scale-[1.02] active:scale-98 transition"
                   >
                     New Session
                   </button>
@@ -1949,7 +2029,7 @@ export default function QuranProjectPage() {
                   <button
                     onClick={() => setShowSettings(false)}
                     aria-label="Close settings"
-                    className="w-9 h-9 rounded-full border border-warm-200 flex items-center justify-center text-warm-500 hover:bg-black hover:text-white hover:border-black transition-all"
+                    className="w-9 h-9 rounded-full border border-warm-200 flex items-center justify-center text-warm-500 hover:bg-black hover:text-white hover:border-black transition"
                   >
                     <Bi name="x-lg" size={14} />
                   </button>
@@ -2081,7 +2161,7 @@ export default function QuranProjectPage() {
                               <button
                                 key={opt.id}
                                 onClick={() => setKaraokeColor(opt.id)}
-                                className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+                                className={`flex-1 py-2 rounded-lg text-sm font-bold transition flex items-center justify-center gap-2 ${
                                   karaokeColor === opt.id
                                     ? "bg-white text-black shadow-sm"
                                     : "text-warm-400 hover:text-warm-500"
@@ -2188,7 +2268,7 @@ export default function QuranProjectPage() {
                         <button
                           key={opt.id}
                           onClick={() => setLanguageMode(opt.id)}
-                          className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+                          className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${
                             languageMode === opt.id
                               ? "bg-white text-black shadow-sm"
                               : "text-warm-400 hover:text-warm-500"
@@ -2226,7 +2306,7 @@ export default function QuranProjectPage() {
                               <button
                                 key={opt.id}
                                 onClick={() => setAutoFocus(opt.id)}
-                                className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${
+                                className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${
                                   autoFocus === opt.id
                                     ? "bg-white text-black shadow-sm"
                                     : "text-warm-400 hover:text-warm-500"
@@ -2278,7 +2358,7 @@ export default function QuranProjectPage() {
                   <button
                     onClick={() => setShowBookmarks(false)}
                     aria-label="Close bookmarks"
-                    className="w-9 h-9 rounded-full border border-warm-200 flex items-center justify-center text-warm-500 hover:bg-black hover:text-white hover:border-black transition-all"
+                    className="w-9 h-9 rounded-full border border-warm-200 flex items-center justify-center text-warm-500 hover:bg-black hover:text-white hover:border-black transition"
                   >
                     <Bi name="x-lg" size={14} />
                   </button>
@@ -2406,6 +2486,13 @@ export default function QuranProjectPage() {
 
         .font-thmanyah {
           font-family: 'Thmanyah Serif Display', 'Fraunces', 'Playfair Display', Georgia, serif;
+        }
+
+        /* Karaoke word highlight — toggled imperatively (no React re-render).
+           Colour comes from --kw-color set on the verse container. */
+        .kw-active {
+          background-color: var(--kw-color, var(--accent-gold-deep));
+          color: #fff;
         }
 
         .font-fraunces {

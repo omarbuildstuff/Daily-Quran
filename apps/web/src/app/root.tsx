@@ -27,7 +27,6 @@ import { LoadFonts } from 'virtual:load-fonts.jsx';
 import fetch from '@/__create/fetch';
 // @ts-expect-error -- generated auth module, no type declarations available
 import { SessionProvider } from '@auth/create/react';
-import { toPng } from 'html-to-image';
 import { useNavigate } from 'react-router';
 import { serializeError } from 'serialize-error';
 import { Toaster, toast } from 'sonner';
@@ -356,6 +355,9 @@ const waitForScreenshotReady = async () => {
 
 export const useHandleScreenshotRequest = () => {
   useEffect(() => {
+    // Dev-sandbox-only feature. Gated so html-to-image is never bundled into
+    // or executed by the production app.
+    if (!import.meta.env.DEV) return;
     const handleMessage = async (event: MessageEvent) => {
       if (event.data.type === 'sandbox:web:screenshot:request') {
         try {
@@ -365,7 +367,9 @@ export const useHandleScreenshotRequest = () => {
           const aspectRatio = 16 / 9;
           const height = Math.floor(width / aspectRatio);
 
-          // html-to-image already handles CORS, fonts, and CSS inlining
+          // html-to-image already handles CORS, fonts, and CSS inlining.
+          // Lazy-loaded so it stays out of the main/prod bundle.
+          const { toPng } = await import('html-to-image');
           const dataUrl = await toPng(document.body, {
             cacheBust: true,
             skipFonts: false,
@@ -405,7 +409,15 @@ export function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const pathname = location?.pathname;
-  const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
+  // Resolve after mount so server and first client render agree (avoids a
+  // hydration mismatch on the Toaster position now that the app is SSR'd).
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data.type === 'sandbox:navigation') {
@@ -441,20 +453,32 @@ export function Layout({ children }: { children: ReactNode }) {
         <title>Quran Hub | Your Daily Quran</title>
         <Meta />
         <Links />
-        <script type="module" src="/src/__create/dev-error-overlay.js"></script>
+        {import.meta.env.DEV ? (
+          <script type="module" src="/src/__create/dev-error-overlay.js"></script>
+        ) : null}
         <link rel="icon" type="image/x-icon" href="/favicon.ico" />
         <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
         <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
         <link rel="manifest" href="/site.webmanifest" />
+        {/* Warm up the Google Fonts origins the global @import uses, and
+            preload the primary verse face so the first verse doesn't FOUT. */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          rel="preload"
+          as="font"
+          type="font/woff2"
+          href="/thmanyahserifdisplay/woff2/thmanyahserifdisplay-Regular.woff2"
+          crossOrigin="anonymous"
+        />
         {LoadFontsSSR ? <LoadFontsSSR /> : null}
       </head>
       <body>
-        <ClientOnly loader={() => children} />
+        <ErrorBoundaryWrapper>{children}</ErrorBoundaryWrapper>
         <Toaster position={isMobile ? 'top-center' : 'bottom-right'} />
         <ScrollRestoration />
         <Scripts />
-        <script src="https://kit.fontawesome.com/2c15cc0cc7.js" crossOrigin="anonymous" async />
       </body>
     </html>
   );
