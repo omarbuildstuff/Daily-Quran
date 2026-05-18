@@ -85,7 +85,7 @@ enum QuranAPI {
         let bundled = QuranText.verses(surahId)
         let name = chapter(surahId)?.nameSimple ?? "Surah \(surahId)"
 
-        let verses: [Verse] = bundled.map { bv in
+        var verses: [Verse] = bundled.map { bv in
             let key = "\(surahId):\(bv.n)"
             let ts = tsByKey[key]
             return Verse(
@@ -98,6 +98,14 @@ enum QuranAPI {
                 segments: ts?.segments ?? [],
                 words: wordsByKey[key] ?? []
             )
+        }
+
+        // Fix degenerate timestamps (endMs <= startMs) — some reciters return
+        // zero-duration verses that can never be "active" in the time-range check.
+        for i in verses.indices {
+            if verses[i].endMs <= verses[i].startMs {
+                verses[i].endMs = (i + 1 < verses.count ? verses[i + 1].startMs : verses[i].startMs + 5000)
+            }
         }
 
         return SurahData(surah: surahId, audioUrl: audio.audio_url, surahName: name, verses: verses)

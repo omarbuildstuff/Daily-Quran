@@ -317,9 +317,16 @@ export default function QuranProjectPage() {
   // (empty deps) and callable from the rAF-throttled timeupdate handler.
   const karaokeStateRef = useRef({ enabled: false });
   const activeWordRef = useRef(0);
+  // Tracks which verse key arabicRef.current belongs to. applyActiveWord skips
+  // when the DOM still belongs to the exiting (old) verse — otherwise word 1
+  // of the new verse is never highlighted because activeWordRef was already set
+  // to 1 while applying to the stale DOM during AnimatePresence's exit phase.
+  const expectedVerseKeyRef = useRef(null);
   const applyActiveWord = useCallback((idx) => {
     const root = arabicRef.current;
     if (!root || !karaokeStateRef.current.enabled) return;
+    // Skip if the <h3> in the DOM is from the outgoing verse (exit animation)
+    if (root.dataset.verseKey !== expectedVerseKeyRef.current) return;
     if (activeWordRef.current === idx) return;
     activeWordRef.current = idx;
     const prev = root.querySelector(".kw-active");
@@ -394,6 +401,15 @@ export default function QuranProjectPage() {
           segments: Array.isArray(ts?.segments) ? ts.segments : [],
           words,
         };
+      });
+
+      // Fix degenerate timestamps (endMs <= startMs) — some reciters return
+      // zero-duration verses that can never be "active" in the time-range check.
+      // Extend endMs to the next verse's startMs so verse tracking works.
+      verses.forEach((v, i) => {
+        if (v.endMs <= v.startMs) {
+          v.endMs = verses[i + 1]?.startMs ?? (v.startMs + 5000);
+        }
       });
 
       return {
@@ -812,7 +828,7 @@ export default function QuranProjectPage() {
   // ─────────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (view === "playing" && isPlaying) {
+    if (view === "playing" && isPlaying && !loading) {
       timerRef.current = setInterval(() => {
         // Ticks the external store, not component state — does not re-render
         // this tree, only the elapsed readout/progress leaves.
@@ -822,7 +838,7 @@ export default function QuranProjectPage() {
       clearInterval(timerRef.current);
     }
     return () => clearInterval(timerRef.current);
-  }, [view, isPlaying]);
+  }, [view, isPlaying, loading]);
 
   // Keep the imperative karaoke in sync with the toggle. When turned off,
   // clear any lingering highlight. When the verse changes, the spans remount
@@ -835,6 +851,7 @@ export default function QuranProjectPage() {
     }
   }, [karaokeEnabled]);
   useEffect(() => {
+    expectedVerseKeyRef.current = currentAyah?.key ?? null;
     activeWordRef.current = 0;
   }, [currentAyah?.key]);
 
@@ -1735,6 +1752,7 @@ export default function QuranProjectPage() {
                           {languageMode !== "english" && (
                             <h3
                               ref={arabicRef}
+                              data-verse-key={currentAyah.key}
                               className="font-thmanyah text-4xl md:text-6xl leading-[1.7] md:leading-[1.7] text-center scroll-mt-32"
                               dir="rtl"
                               style={{

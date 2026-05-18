@@ -309,6 +309,7 @@ final class AudioEngine {
         model.currentAyah = CurrentAyah(key: v.key, text: v.text, translation: v.translation,
                                         surahName: surahName, segments: v.segments, words: v.words)
         model.hoveredWordPos = nil
+        model.currentWordIdx = 0
         onVerseChanged()
         updateNowPlaying()
     }
@@ -346,7 +347,7 @@ final class AudioEngine {
         elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                if self.model.view == .playing && self.model.isPlaying {
+                if self.model.view == .playing && self.model.isPlaying && !self.model.loading {
                     self.model.elapsedTime += 1
                 }
             }
