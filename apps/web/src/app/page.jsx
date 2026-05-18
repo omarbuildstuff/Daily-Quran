@@ -54,6 +54,7 @@ const RECITERS = [
   { id: 2, name: "AbdulBaset AbdulSamad" },
   { id: 10, name: "Sa'ud ash-Shuraym" },
   { id: 5, name: "Hani ar-Rifai" },
+  { id: 4, name: "Abu Bakr Ash-Shatri" },
 ];
 
 const DURATIONS = [
