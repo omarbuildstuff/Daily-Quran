@@ -910,7 +910,7 @@ export default function QuranProjectPage() {
             {view !== "setup" && (
               <button
                 onClick={handleEndSession}
-                className="px-4 py-2 bg-white/50 backdrop-blur-md border border-warm-200 rounded-full text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition-all duration-300"
+                className="px-4 py-2 bg-white/80 border border-warm-200 rounded-full text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition-all duration-300"
               >
                 End Session
               </button>
@@ -919,7 +919,7 @@ export default function QuranProjectPage() {
               <button
                 onClick={() => setShowSettings(true)}
                 aria-label="Settings"
-                className="w-10 h-10 bg-white/50 backdrop-blur-md border border-warm-200 rounded-full flex items-center justify-center text-warm-500 hover:bg-black hover:text-white hover:border-black transition-all duration-300"
+                className="w-10 h-10 bg-white/80 border border-warm-200 rounded-full flex items-center justify-center text-warm-500 hover:bg-black hover:text-white hover:border-black transition-all duration-300"
               >
                 <Bi name="gear-wide" size={16} />
               </button>
@@ -932,9 +932,10 @@ export default function QuranProjectPage() {
             {view === "setup" && (
               <motion.div
                 key="setup"
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.05 }}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
                 className="space-y-12"
               >
                 {/* Resume prompt — surfaces last bookmark within 24h.
@@ -942,9 +943,9 @@ export default function QuranProjectPage() {
                 <AnimatePresence>
                   {showResumePrompt && lastSession && (
                     <motion.div
-                      initial={{ opacity: 0, y: -8, height: 0 }}
-                      animate={{ opacity: 1, y: 0, height: "auto" }}
-                      exit={{ opacity: 0, y: -8, height: 0 }}
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
                       transition={{ duration: 0.3, ease: "easeOut" }}
                       className="overflow-hidden"
                     >
@@ -989,9 +990,9 @@ export default function QuranProjectPage() {
                 <AnimatePresence>
                   {showReminderBanner && (
                     <motion.div
-                      initial={{ opacity: 0, y: -8, height: 0 }}
-                      animate={{ opacity: 1, y: 0, height: "auto" }}
-                      exit={{ opacity: 0, y: -8, height: 0 }}
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
                       transition={{ duration: 0.3, ease: "easeOut" }}
                       className="overflow-hidden"
                     >
@@ -1134,9 +1135,9 @@ export default function QuranProjectPage() {
                         <AnimatePresence>
                           {surahTimerEnabled && (
                             <motion.div
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
-                              exit={{ opacity: 0, height: 0 }}
+                              initial={{ opacity: 0, y: -8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -8 }}
                               transition={{ duration: 0.25, ease: "easeOut" }}
                               className="overflow-hidden"
                             >
@@ -1232,9 +1233,9 @@ export default function QuranProjectPage() {
                             const clamp = (n) => Math.min(Math.max(1, Number(n) || 1), versesCount);
                             return (
                               <motion.div
-                                initial={{ opacity: 0, height: 0 }}
-                                animate={{ opacity: 1, height: "auto" }}
-                                exit={{ opacity: 0, height: 0 }}
+                                initial={{ opacity: 0, y: -8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -8 }}
                                 transition={{ duration: 0.25, ease: "easeOut" }}
                                 className="overflow-hidden"
                               >
@@ -1440,9 +1441,9 @@ export default function QuranProjectPage() {
                         <AnimatePresence>
                           {moodEnabled && (
                             <motion.div
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
-                              exit={{ opacity: 0, height: 0 }}
+                              initial={{ opacity: 0, y: -8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -8 }}
                               transition={{ duration: 0.25, ease: "easeOut" }}
                               className="overflow-hidden"
                             >
@@ -1707,7 +1708,7 @@ export default function QuranProjectPage() {
                     semi-transparent bottom chrome from bleeding into the dock */}
                 <div className="playback-fade fixed left-0 right-0 bottom-0 z-40 pointer-events-none" />
                 <div className="playback-dock fixed left-0 right-0 px-6 z-50">
-                  <div className="max-w-screen-sm mx-auto bg-white/90 backdrop-blur-2xl border border-warm-200 rounded-3xl px-6 py-5 shadow-overlay flex items-center justify-between gap-4">
+                  <div className="max-w-screen-sm mx-auto bg-white/95 border border-warm-200 rounded-3xl px-6 py-5 shadow-overlay flex items-center justify-between gap-4">
                     <button
                       onClick={() => setIsPlaying(!isPlaying)}
                       className="w-14 h-14 bg-black rounded-2xl flex items-center justify-center text-white shadow-card hover:scale-105 active:scale-95 transition-all shrink-0"
@@ -1828,8 +1829,9 @@ export default function QuranProjectPage() {
             {view === "finished" && (
               <motion.div
                 key="finished"
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2 }}
                 className="text-center space-y-12"
               >
                 <div className="relative inline-block">
@@ -1930,13 +1932,13 @@ export default function QuranProjectPage() {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
               onClick={() => setShowSettings(false)}
-              className="fixed inset-0 z-[90] bg-black/30 backdrop-blur-sm flex items-center justify-center p-6"
+              className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-6"
             >
               <motion.div
-                initial={{ opacity: 0, y: 20, scale: 0.96 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 20, scale: 0.96 }}
-                transition={{ duration: 0.25, ease: "easeOut" }}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
                 onClick={(e) => e.stopPropagation()}
                 className="w-full max-w-md max-h-[85vh] bg-white border border-warm-200 rounded-3xl shadow-overlay overflow-hidden flex flex-col"
               >
@@ -2061,9 +2063,9 @@ export default function QuranProjectPage() {
                   <AnimatePresence>
                     {karaokeEnabled && (
                       <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
                         transition={{ duration: 0.25, ease: "easeOut" }}
                         className="overflow-hidden"
                       >
@@ -2201,9 +2203,9 @@ export default function QuranProjectPage() {
                   <AnimatePresence>
                     {languageMode === "both" && (
                       <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
                         transition={{ duration: 0.25, ease: "easeOut" }}
                         className="overflow-hidden"
                       >
@@ -2254,13 +2256,13 @@ export default function QuranProjectPage() {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
               onClick={() => setShowBookmarks(false)}
-              className="fixed inset-0 z-[90] bg-black/30 backdrop-blur-sm flex items-center justify-center p-6"
+              className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-6"
             >
               <motion.div
-                initial={{ opacity: 0, y: 20, scale: 0.96 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 20, scale: 0.96 }}
-                transition={{ duration: 0.25, ease: "easeOut" }}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
                 onClick={(e) => e.stopPropagation()}
                 className="w-full max-w-md max-h-[80vh] flex flex-col bg-white border border-warm-200 rounded-3xl shadow-overlay overflow-hidden"
               >
