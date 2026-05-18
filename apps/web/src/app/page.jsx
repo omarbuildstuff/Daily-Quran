@@ -191,6 +191,7 @@ export default function QuranProjectPage() {
 
   const timerRef = useRef(null);
   const shownTodayRef = useRef(null);
+  const rafPendingRef = useRef(false);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Fetch full surah: audio URL + verse timestamps + per-verse text + translations
@@ -309,54 +310,59 @@ export default function QuranProjectPage() {
   }, []);
 
   const handleTimeUpdate = useCallback(() => {
-    updateCurrentVerse();
+    if (rafPendingRef.current) return;
+    rafPendingRef.current = true;
+    requestAnimationFrame(() => {
+      rafPendingRef.current = false;
+      updateCurrentVerse();
 
-    // Memorization mode — loop or stop at end of selected verse range.
-    // Takes priority over the duration timer.
-    if (mode === "surah" && memorizationEnabled) {
-      const el = audioRef.current;
-      const sd = surahDataRef.current;
-      if (!el || !sd) return;
-      const startV = sd.verses.find((v) => v.num === Number(memStartVerse));
-      const endV = sd.verses.find((v) => v.num === Number(memEndVerse));
-      if (!startV || !endV) return;
-      const currentMs = el.currentTime * 1000;
-      if (currentMs >= endV.endMs - 60) {
-        if (memRepeat) {
-          el.currentTime = startV.startMs / 1000;
-        } else {
-          el.pause();
-          setView("finished");
-          setIsPlaying(false);
-        }
-      }
-      return; // skip duration-timer logic when memorizing
-    }
-
-    // Timer-based end condition (random mode OR surah mode with optional timer enabled)
-    // Skipped entirely when user turns auto-stop off — audio keeps going until surah ends.
-    const timerActive =
-      autoStopTimer && (mode === "random" || (mode === "surah" && surahTimerEnabled));
-    if (timerActive) {
-      const now = Date.now();
-      const elapsed = (now - startTime) / 1000;
-      if (elapsed >= targetDuration) {
-        // Wait for end of current verse before stopping
+      // Memorization mode — loop or stop at end of selected verse range.
+      // Takes priority over the duration timer.
+      if (mode === "surah" && memorizationEnabled) {
         const el = audioRef.current;
         const sd = surahDataRef.current;
         if (!el || !sd) return;
+        const startV = sd.verses.find((v) => v.num === Number(memStartVerse));
+        const endV = sd.verses.find((v) => v.num === Number(memEndVerse));
+        if (!startV || !endV) return;
         const currentMs = el.currentTime * 1000;
-        const active = sd.verses.find(
-          (v) => currentMs >= v.startMs && currentMs < v.endMs,
-        );
-        // If we're within ~200ms of the end of the current verse, stop now
-        if (active && active.endMs - currentMs <= 200) {
-          el.pause();
-          setView("finished");
-          setIsPlaying(false);
+        if (currentMs >= endV.endMs - 60) {
+          if (memRepeat) {
+            el.currentTime = startV.startMs / 1000;
+          } else {
+            el.pause();
+            setView("finished");
+            setIsPlaying(false);
+          }
+        }
+        return; // skip duration-timer logic when memorizing
+      }
+
+      // Timer-based end condition (random mode OR surah mode with optional timer enabled)
+      // Skipped entirely when user turns auto-stop off — audio keeps going until surah ends.
+      const timerActive =
+        autoStopTimer && (mode === "random" || (mode === "surah" && surahTimerEnabled));
+      if (timerActive) {
+        const now = Date.now();
+        const elapsed = (now - startTime) / 1000;
+        if (elapsed >= targetDuration) {
+          // Wait for end of current verse before stopping
+          const el = audioRef.current;
+          const sd = surahDataRef.current;
+          if (!el || !sd) return;
+          const currentMs = el.currentTime * 1000;
+          const active = sd.verses.find(
+            (v) => currentMs >= v.startMs && currentMs < v.endMs,
+          );
+          // If we're within ~200ms of the end of the current verse, stop now
+          if (active && active.endMs - currentMs <= 200) {
+            el.pause();
+            setView("finished");
+            setIsPlaying(false);
+          }
         }
       }
-    }
+    });
   }, [
     updateCurrentVerse,
     mode,
@@ -1571,7 +1577,6 @@ export default function QuranProjectPage() {
                           exit={{ opacity: 0, y: -16 }}
                           transition={{ duration: 0.3, ease: "easeOut" }}
                           onAnimationComplete={handleVerseEntered}
-                          style={{ willChange: "transform, opacity" }}
                           className="space-y-6"
                         >
                           <div className="flex items-center justify-center gap-4">
