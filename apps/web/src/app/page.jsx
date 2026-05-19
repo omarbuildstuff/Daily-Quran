@@ -49,8 +49,7 @@ const Bi = ({ name, size = 16, className = "", ...rest }) => {
 };
 
 const RECITERS = [
-  { id: 7, name: "Mishari Rashid al-Afasy (Studio)" },
-  { id: 173, name: "Mishari Rashid al-Afasy (Live)" },
+  { id: 7, name: "Mishari Rashid al-Afasy" },
   { id: 3, name: "Abdur-Rahman as-Sudais" },
   { id: 12, name: "Mahmoud Khalil Al-Husary" },
   { id: 2, name: "AbdulBaset AbdulSamad" },
@@ -59,6 +58,7 @@ const RECITERS = [
   { id: 4, name: "Abu Bakr Ash-Shatri" },
   { id: 13, name: "Saad Al-Ghamdi" },
   { id: 161, name: "Khalifah Al-Tunaiji" },
+  { id: 52, name: "Maher al-Muaiqly" },
 ];
 
 const DURATIONS = [
