@@ -58,6 +58,9 @@ const RECITERS = [
   { id: 4, name: "Abu Bakr Ash-Shatri" },
   { id: 13, name: "Saad Al-Ghamdi" },
   { id: 161, name: "Khalifah Al-Tunaiji" },
+  // Maher uses per-ayah audio from everyayah.com; quran.com's chapter_recitations
+  // entry for him pairs audio from one recording with timestamps from another.
+  { id: 159, name: "Maher al-Muaiqly", source: "everyayah-maher" },
 ];
 
 const DURATIONS = [
@@ -166,6 +169,7 @@ const ProgressTrack = React.memo(function ProgressTrack({
   targetDuration,
   surahDataRef,
   audioRef,
+  playPlaylistAyah,
 }) {
   const elapsed = useElapsedStore((s) => s.elapsed);
   const surahMode = mode === "surah" && !surahTimerEnabled && currentAyah;
@@ -186,6 +190,10 @@ const ProgressTrack = React.memo(function ProgressTrack({
       sd.verses.length - 1,
       Math.floor(r * sd.verses.length),
     );
+    if (sd.isPlaylist) {
+      playPlaylistAyah?.(targetVerseIdx);
+      return;
+    }
     const target = sd.verses[targetVerseIdx];
     if (target) el.currentTime = target.startMs / 1000;
   };
@@ -302,6 +310,9 @@ export default function QuranProjectPage() {
   const surahDataRef = useRef(null);
   // Prefetched next surah (for random mode when current finishes before timer ends)
   const nextSurahDataRef = useRef(null);
+  // Index into surahDataRef.current.playlist for per-ayah reciters (Maher).
+  // Unused when surahData.isPlaylist is false.
+  const playlistIndexRef = useRef(0);
   // Surahs already played in the current random session — avoids repeats within a mood pool
   const playedSurahsRef = useRef([]);
 
@@ -344,16 +355,89 @@ export default function QuranProjectPage() {
   // All in one bundled call. Returns { surah, audioUrl, surahName, verses: [{num, text, translation, startMs, endMs}] }
   const fetchSurahData = useCallback(
     async (surahId) => {
+      const reciter = RECITERS.find((r) => r.id === reciterId);
+      const isEveryayahMaher = reciter?.source === "everyayah-maher";
+
+      const versesUrl = `https://api.quran.com/api/v4/verses/by_chapter/${surahId}?fields=text_uthmani&words=true&word_fields=text_uthmani&per_page=300`;
+      const translationsUrl = `https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/eng-mustafakhattaba/${surahId}.json`;
+
+      const surahName =
+        chapters.find((c) => c.id === surahId)?.name_simple || `Surah ${surahId}`;
+
+      const buildTranslationMap = (translationsData) => {
+        const map = {};
+        if (translationsData?.chapter) {
+          translationsData.chapter.forEach((t) => {
+            map[t.verse] = (t.text || "")
+              .replace(/<sup[^>]*>.*?<\/sup>/gi, "")
+              .replace(/<[^>]*>/g, "");
+          });
+        }
+        return map;
+      };
+
+      // Per-ayah audio reciters (Maher via everyayah). Each verse is its own
+      // MP3 — the player advances through the playlist on `ended`. Verse-level
+      // tracking is exact (it's whichever ayah's MP3 is playing). Word-by-word
+      // karaoke is unavailable since everyayah doesn't ship word timings.
+      if (isEveryayahMaher) {
+        const [versesRes, translationsRes] = await Promise.all([
+          fetch(versesUrl),
+          fetch(translationsUrl),
+        ]);
+        if (!versesRes.ok) throw new Error(`Verse API error: ${versesRes.status}`);
+        const [versesData, translationsData] = await Promise.all([
+          versesRes.json(),
+          translationsRes.ok ? translationsRes.json() : null,
+        ]);
+        const translationByVerse = buildTranslationMap(translationsData);
+
+        const verses = versesData.verses.map((v) => {
+          const words = (v.words || [])
+            .filter((w) => w.char_type_name === "word")
+            .map((w) => ({
+              position: w.position,
+              text: w.text_uthmani || w.text || "",
+              translation: w.translation?.text || "",
+              transliteration: w.transliteration?.text || "",
+            }));
+          return {
+            num: v.verse_number,
+            key: v.verse_key,
+            text: v.text_uthmani,
+            translation:
+              translationByVerse[v.verse_number] || "Translation not available",
+            // startMs/endMs and segments are intentionally empty for playlist
+            // reciters — verse tracking uses the playlist index, not audio time.
+            startMs: 0,
+            endMs: 0,
+            segments: [],
+            words,
+          };
+        });
+
+        const sss = String(surahId).padStart(3, "0");
+        const playlist = verses.map((v) => ({
+          num: v.num,
+          url: `https://everyayah.com/data/MaherAlMuaiqly128kbps/${sss}${String(v.num).padStart(3, "0")}.mp3`,
+        }));
+
+        return {
+          surah: surahId,
+          surahName,
+          audioUrl: playlist[0]?.url || "",
+          verses,
+          isPlaylist: true,
+          playlist,
+        };
+      }
+
       const [chapterAudioRes, versesRes, translationsRes] = await Promise.all([
         fetch(
           `https://api.quran.com/api/v4/chapter_recitations/${reciterId}/${surahId}?segments=true`,
         ),
-        fetch(
-          `https://api.quran.com/api/v4/verses/by_chapter/${surahId}?fields=text_uthmani&words=true&word_fields=text_uthmani&per_page=300`,
-        ),
-        fetch(
-          `https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/eng-mustafakhattaba/${surahId}.json`,
-        ),
+        fetch(versesUrl),
+        fetch(translationsUrl),
       ]);
 
       if (!chapterAudioRes.ok) throw new Error(`Audio API error: ${chapterAudioRes.status}`);
@@ -368,14 +452,7 @@ export default function QuranProjectPage() {
       if (!chapterAudio.audio_file) throw new Error("Chapter audio not found");
 
       const timestamps = chapterAudio.audio_file.timestamps || [];
-      const translationByVerse = {};
-      if (translationsData?.chapter) {
-        translationsData.chapter.forEach((t) => {
-          translationByVerse[t.verse] = (t.text || "")
-            .replace(/<sup[^>]*>.*?<\/sup>/gi, "")
-            .replace(/<[^>]*>/g, "");
-        });
-      }
+      const translationByVerse = buildTranslationMap(translationsData);
 
       const verses = versesData.verses.map((v) => {
         const ts = timestamps.find((t) => t.verse_key === v.verse_key);
@@ -417,8 +494,7 @@ export default function QuranProjectPage() {
       return {
         surah: surahId,
         audioUrl: chapterAudio.audio_file.audio_url,
-        surahName:
-          chapters.find((c) => c.id === surahId)?.name_simple || `Surah ${surahId}`,
+        surahName,
         verses,
       };
     },
@@ -469,6 +545,12 @@ export default function QuranProjectPage() {
     rafPendingRef.current = true;
     requestAnimationFrame(() => {
       rafPendingRef.current = false;
+
+      // Playlist (per-ayah) reciters drive verse tracking and end conditions
+      // from handleSurahEnded. Time-based lookups don't apply since every
+      // verse here is a separate MP3 with its own currentTime starting at 0.
+      if (surahDataRef.current?.isPlaylist) return;
+
       updateCurrentVerse();
 
       // Memorization mode — loop or stop at end of selected verse range.
@@ -553,6 +635,31 @@ export default function QuranProjectPage() {
     return picked;
   }, [moodEnabled, selectedMood]);
 
+  // Switch the audio element to a specific ayah of a per-ayah (playlist) surah
+  // and update the displayed verse. Returns the verse object that was activated.
+  const playPlaylistAyah = useCallback((idx) => {
+    const sd = surahDataRef.current;
+    const el = audioRef.current;
+    if (!sd?.isPlaylist || !el) return null;
+    const clamped = Math.max(0, Math.min(sd.playlist.length - 1, idx));
+    playlistIndexRef.current = clamped;
+    const entry = sd.playlist[clamped];
+    const verse = sd.verses[clamped];
+    if (!entry || !verse) return null;
+    setCurrentAyah({
+      key: verse.key,
+      text: verse.text,
+      translation: verse.translation,
+      surahName: sd.surahName,
+      segments: [],
+      words: verse.words || [],
+    });
+    el.src = entry.url;
+    el.load();
+    el.play().catch((e) => console.error("Playback error:", e));
+    return verse;
+  }, []);
+
   // Prefetch next surah (for random mode when current surah ends before timer)
   const prefetchRandomSurah = useCallback(async () => {
     try {
@@ -571,6 +678,7 @@ export default function QuranProjectPage() {
       try {
         const data = preloaded || (await fetchSurahData(surahId));
         surahDataRef.current = data;
+        playlistIndexRef.current = 0;
 
         // For memorization, the listener wants to start at a specific verse —
         // pick that one instead of verse 1 for the immediate display.
@@ -578,6 +686,19 @@ export default function QuranProjectPage() {
           mode === "surah" && memorizationEnabled
             ? data.verses.find((v) => v.num === Number(memStartVerse)) || data.verses[0]
             : data.verses[0];
+
+        // Playlist reciters: pick the ayah index for the initial verse and
+        // hand off to playPlaylistAyah, which sets src + display + plays.
+        if (data.isPlaylist) {
+          const idx = Math.max(
+            0,
+            data.playlist.findIndex((p) => p.num === initialVerse?.num),
+          );
+          playPlaylistAyah(idx);
+          setLoading(false);
+          if (mode === "random") prefetchRandomSurah();
+          return;
+        }
 
         if (initialVerse) {
           setCurrentAyah({
@@ -623,15 +744,70 @@ export default function QuranProjectPage() {
         setLoading(false);
       }
     },
-    [fetchSurahData, mode, prefetchRandomSurah, memorizationEnabled, memStartVerse],
+    [
+      fetchSurahData,
+      mode,
+      prefetchRandomSurah,
+      memorizationEnabled,
+      memStartVerse,
+      playPlaylistAyah,
+    ],
   );
 
   // When the full surah audio naturally ends (via onEnded)
   const handleSurahEnded = useCallback(() => {
+    const sd = surahDataRef.current;
+
+    // Playlist (per-ayah) reciters: each `ended` is the end of one ayah, not
+    // the whole surah. Advance through the playlist; only fall through to the
+    // chapter-end logic below when the last ayah finishes (or memorization /
+    // session-timer asks us to stop early).
+    if (sd?.isPlaylist) {
+      const idx = playlistIndexRef.current;
+      const last = sd.playlist.length - 1;
+      const memStart = Number(memStartVerse);
+      const memEnd = Number(memEndVerse);
+      const currentNum = sd.playlist[idx]?.num;
+
+      if (mode === "surah" && memorizationEnabled && memStart > 0 && memEnd > 0) {
+        if (currentNum >= memEnd) {
+          if (memRepeat) {
+            const startIdx = sd.playlist.findIndex((p) => p.num === memStart);
+            playPlaylistAyah(startIdx >= 0 ? startIdx : 0);
+            return;
+          }
+          setView("finished");
+          setIsPlaying(false);
+          return;
+        }
+        playPlaylistAyah(idx + 1);
+        return;
+      }
+
+      // Session timer: stop at the end of the current ayah once the clock has
+      // run out, instead of cutting in mid-verse like the chapter-audio path
+      // does (which can read currentTime mid-stream).
+      const timerActive =
+        autoStopTimer && (mode === "random" || (mode === "surah" && surahTimerEnabled));
+      if (timerActive) {
+        const elapsed = (Date.now() - startTime) / 1000;
+        if (elapsed >= targetDuration) {
+          setView("finished");
+          setIsPlaying(false);
+          return;
+        }
+      }
+
+      if (idx < last) {
+        playPlaylistAyah(idx + 1);
+        return;
+      }
+      // Last ayah finished — fall through to the chapter-end logic below.
+    }
+
     if (mode === "surah") {
       // Memorization with repeat — loop back to the start verse instead of finishing
       if (memorizationEnabled && memRepeat) {
-        const sd = surahDataRef.current;
         const el = audioRef.current;
         const startV = sd?.verses.find((v) => v.num === Number(memStartVerse));
         if (sd && el && startV) {
@@ -670,6 +846,10 @@ export default function QuranProjectPage() {
     memorizationEnabled,
     memRepeat,
     memStartVerse,
+    memEndVerse,
+    surahTimerEnabled,
+    autoStopTimer,
+    playPlaylistAyah,
   ]);
 
   const startPlayback = useCallback(() => {
@@ -791,7 +971,19 @@ export default function QuranProjectPage() {
     try {
       const data = await fetchSurahData(lastSession.surah);
       surahDataRef.current = data;
+      playlistIndexRef.current = 0;
       const verseNum = Number(lastSession.verseKey.split(":")[1]);
+
+      if (data.isPlaylist) {
+        const idx = Math.max(
+          0,
+          data.playlist.findIndex((p) => p.num === verseNum),
+        );
+        playPlaylistAyah(idx);
+        setLoading(false);
+        return;
+      }
+
       const startV = data.verses.find((v) => v.num === verseNum) || data.verses[0];
       setCurrentAyah({
         key: startV.key,
@@ -818,7 +1010,7 @@ export default function QuranProjectPage() {
       setError(err.message);
       setLoading(false);
     }
-  }, [lastSession, fetchSurahData, setMode, setSelectedSurah]);
+  }, [lastSession, fetchSurahData, setMode, setSelectedSurah, playPlaylistAyah]);
 
   const handleDismissResume = useCallback(() => {
     setShowResumePrompt(false);
@@ -1921,6 +2113,7 @@ export default function QuranProjectPage() {
                     targetDuration={targetDuration}
                     surahDataRef={surahDataRef}
                     audioRef={audioRef}
+                    playPlaylistAyah={playPlaylistAyah}
                   />
                 </div>
               </motion.div>
