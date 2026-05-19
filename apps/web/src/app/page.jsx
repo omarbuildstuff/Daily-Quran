@@ -58,7 +58,6 @@ const RECITERS = [
   { id: 4, name: "Abu Bakr Ash-Shatri" },
   { id: 13, name: "Saad Al-Ghamdi" },
   { id: 161, name: "Khalifah Al-Tunaiji" },
-  { id: 159, name: "Maher al-Muaiqly" },
 ];
 
 const DURATIONS = [
@@ -232,6 +231,9 @@ export default function QuranProjectPage() {
     setGreeting(getGreeting());
   }, []);
   const [reciterId, setReciterId] = usePersistentState("reciterId", 7);
+  useEffect(() => {
+    if (!RECITERS.some((r) => r.id === reciterId)) setReciterId(7);
+  }, [reciterId, setReciterId]);
   const [targetDuration, setTargetDuration] = usePersistentState("targetDuration", 300);
   const [currentAyah, setCurrentAyah] = useState(null);
   // Active word index (1-based) for the karaoke highlight is NOT React state:
