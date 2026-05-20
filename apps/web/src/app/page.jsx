@@ -58,9 +58,23 @@ const RECITERS = [
   { id: 4, name: "Abu Bakr Ash-Shatri" },
   { id: 13, name: "Saad Al-Ghamdi" },
   { id: 161, name: "Khalifah Al-Tunaiji" },
-  // Maher uses per-ayah audio from everyayah.com; quran.com's chapter_recitations
-  // entry for him pairs audio from one recording with timestamps from another.
-  { id: 159, name: "Maher al-Muaiqly", source: "everyayah-maher" },
+  // Per-ayah reciters: each verse is its own MP3 served by everyayah.com.
+  // The player switches to a dual-<audio> ping-pong path that preloads the
+  // next ayah while the current is playing, for gapless verse transitions.
+  // quran.com's chapter_recitations pairs audio from one recording with
+  // timestamps from another for these two, so we don't use that endpoint.
+  {
+    id: 159,
+    name: "Maher al-Muaiqly",
+    source: "everyayah",
+    everyayahFolder: "MaherAlMuaiqly128kbps",
+  },
+  {
+    id: 14,
+    name: "Fares Abbad",
+    source: "everyayah",
+    everyayahFolder: "Fares_Abbad_64kbps",
+  },
 ];
 
 const DURATIONS = [
@@ -310,9 +324,17 @@ export default function QuranProjectPage() {
   const surahDataRef = useRef(null);
   // Prefetched next surah (for random mode when current finishes before timer ends)
   const nextSurahDataRef = useRef(null);
-  // Index into surahDataRef.current.playlist for per-ayah reciters (Maher).
+  // Index into surahDataRef.current.playlist for per-ayah reciters.
   // Unused when surahData.isPlaylist is false.
   const playlistIndexRef = useRef(0);
+  // Second audio element used only in playlist mode for gapless verse handoff.
+  // Created imperatively in an effect so we don't add it to the JSX tree —
+  // chapter_recitations reciters never touch it. The ended listener routes
+  // through handleSurahEndedRef so the closure can be updated each render
+  // without re-attaching the event listener.
+  const audioBRef = useRef(null);
+  const activePlaylistAudioRef = useRef("A"); // "A" => audioRef, "B" => audioBRef
+  const handleSurahEndedRef = useRef(() => {});
   // Surahs already played in the current random session — avoids repeats within a mood pool
   const playedSurahsRef = useRef([]);
 
@@ -356,7 +378,7 @@ export default function QuranProjectPage() {
   const fetchSurahData = useCallback(
     async (surahId) => {
       const reciter = RECITERS.find((r) => r.id === reciterId);
-      const isEveryayahMaher = reciter?.source === "everyayah-maher";
+      const isEveryayah = reciter?.source === "everyayah";
 
       const versesUrl = `https://api.quran.com/api/v4/verses/by_chapter/${surahId}?fields=text_uthmani&words=true&word_fields=text_uthmani&per_page=300`;
       const translationsUrl = `https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/eng-mustafakhattaba/${surahId}.json`;
@@ -376,11 +398,13 @@ export default function QuranProjectPage() {
         return map;
       };
 
-      // Per-ayah audio reciters (Maher via everyayah). Each verse is its own
-      // MP3 — the player advances through the playlist on `ended`. Verse-level
-      // tracking is exact (it's whichever ayah's MP3 is playing). Word-by-word
-      // karaoke is unavailable since everyayah doesn't ship word timings.
-      if (isEveryayahMaher) {
+      // Per-ayah audio reciters via everyayah.com. Each verse is its own MP3 —
+      // the player advances through the playlist with a dual-<audio> handoff,
+      // preloading the next ayah while the current is playing so transitions
+      // are gapless. Verse-level tracking is exact (it's whichever ayah's MP3
+      // is playing). Word-by-word karaoke is unavailable since everyayah
+      // doesn't ship word timings.
+      if (isEveryayah) {
         const [versesRes, translationsRes] = await Promise.all([
           fetch(versesUrl),
           fetch(translationsUrl),
@@ -417,9 +441,10 @@ export default function QuranProjectPage() {
         });
 
         const sss = String(surahId).padStart(3, "0");
+        const folder = reciter.everyayahFolder;
         const playlist = verses.map((v) => ({
           num: v.num,
-          url: `https://everyayah.com/data/MaherAlMuaiqly128kbps/${sss}${String(v.num).padStart(3, "0")}.mp3`,
+          url: `https://everyayah.com/data/${folder}/${sss}${String(v.num).padStart(3, "0")}.mp3`,
         }));
 
         return {
@@ -635,16 +660,40 @@ export default function QuranProjectPage() {
     return picked;
   }, [moodEnabled, selectedMood]);
 
-  // Switch the audio element to a specific ayah of a per-ayah (playlist) surah
-  // and update the displayed verse. Returns the verse object that was activated.
+  // Initialize the secondary audio element once on mount. It lives outside
+  // the JSX tree so non-playlist reciters never touch it. The `ended`
+  // listener routes through handleSurahEndedRef so the closure can be updated
+  // each render without re-attaching the listener.
+  useEffect(() => {
+    if (audioBRef.current || typeof window === "undefined") return;
+    const el = new window.Audio();
+    el.preload = "auto";
+    el.addEventListener("ended", () => {
+      handleSurahEndedRef.current?.();
+    });
+    audioBRef.current = el;
+  }, []);
+
+  // Helper: which audio element is currently the live one in playlist mode.
+  const getActivePlaylistEl = () =>
+    activePlaylistAudioRef.current === "A" ? audioRef.current : audioBRef.current;
+  const getStandbyPlaylistEl = () =>
+    activePlaylistAudioRef.current === "A" ? audioBRef.current : audioRef.current;
+
+  // Switch the audio elements to a specific ayah of a per-ayah (playlist)
+  // surah. Used for initial play, memorization start, resume-from-bookmark,
+  // and scrubbing — i.e., any non-sequential jump. Pins active to "A" for a
+  // deterministic state, plays the target ayah on A, and starts preloading
+  // the next ayah on B so the following transition is gapless.
   const playPlaylistAyah = useCallback((idx) => {
     const sd = surahDataRef.current;
-    const el = audioRef.current;
-    if (!sd?.isPlaylist || !el) return null;
+    if (!sd?.isPlaylist) return null;
     const clamped = Math.max(0, Math.min(sd.playlist.length - 1, idx));
     playlistIndexRef.current = clamped;
-    const entry = sd.playlist[clamped];
+    activePlaylistAudioRef.current = "A";
+
     const verse = sd.verses[clamped];
+    const entry = sd.playlist[clamped];
     if (!entry || !verse) return null;
     setCurrentAyah({
       key: verse.key,
@@ -654,10 +703,77 @@ export default function QuranProjectPage() {
       segments: [],
       words: verse.words || [],
     });
-    el.src = entry.url;
-    el.load();
-    el.play().catch((e) => console.error("Playback error:", e));
+
+    const a = audioRef.current;
+    const b = audioBRef.current;
+    if (b) {
+      b.pause();
+    }
+    if (a) {
+      a.src = entry.url;
+      a.load();
+      a.play().catch((e) => console.error("Playback error:", e));
+    }
+
+    const nextEntry = sd.playlist[clamped + 1];
+    if (b && nextEntry) {
+      // Setting src on a preload="auto" element triggers fetch + decode in
+      // the background. By the time A's ayah ends, B is buffered and ready.
+      // Explicit load() kicks the fetch reliably on iOS Safari.
+      b.src = nextEntry.url;
+      b.load();
+    } else if (b) {
+      b.removeAttribute("src");
+    }
     return verse;
+  }, []);
+
+  // Gapless handoff. Called when the currently-playing playlist element ends
+  // and we want to move to the next ayah without setting/loading the active
+  // element's src (which would introduce a fetch/decode gap). The standby
+  // element already has the next ayah buffered, so play() on it is near-
+  // instant; the now-standby element is queued with the ayah AFTER for the
+  // following handoff.
+  const advancePlaylist = useCallback(() => {
+    const sd = surahDataRef.current;
+    if (!sd?.isPlaylist) return false;
+    const nextIdx = playlistIndexRef.current + 1;
+    const nextEntry = sd.playlist[nextIdx];
+    const verse = sd.verses[nextIdx];
+    if (!nextEntry || !verse) return false;
+
+    playlistIndexRef.current = nextIdx;
+    setCurrentAyah({
+      key: verse.key,
+      text: verse.text,
+      translation: verse.translation,
+      surahName: sd.surahName,
+      segments: [],
+      words: verse.words || [],
+    });
+
+    activePlaylistAudioRef.current =
+      activePlaylistAudioRef.current === "A" ? "B" : "A";
+    const active = getActivePlaylistEl();
+    if (active) {
+      // currentTime may have advanced past 0 if a previous preload run got
+      // far enough; reset to be safe.
+      try { active.currentTime = 0; } catch {}
+      active.play().catch((e) => console.error("Playback error:", e));
+    }
+
+    const preloadEntry = sd.playlist[nextIdx + 1];
+    const standby = getStandbyPlaylistEl();
+    if (standby) {
+      standby.pause();
+      if (preloadEntry) {
+        standby.src = preloadEntry.url;
+        standby.load();
+      } else {
+        standby.removeAttribute("src");
+      }
+    }
+    return true;
   }, []);
 
   // Prefetch next surah (for random mode when current surah ends before timer)
@@ -773,6 +889,8 @@ export default function QuranProjectPage() {
         if (currentNum >= memEnd) {
           if (memRepeat) {
             const startIdx = sd.playlist.findIndex((p) => p.num === memStart);
+            // Loop point isn't preloaded (we only preload N+1), so this jump
+            // can have a small gap — acceptable for the repeat boundary.
             playPlaylistAyah(startIdx >= 0 ? startIdx : 0);
             return;
           }
@@ -780,7 +898,8 @@ export default function QuranProjectPage() {
           setIsPlaying(false);
           return;
         }
-        playPlaylistAyah(idx + 1);
+        // Sequential advance — gapless via the preloaded standby element.
+        advancePlaylist();
         return;
       }
 
@@ -799,7 +918,8 @@ export default function QuranProjectPage() {
       }
 
       if (idx < last) {
-        playPlaylistAyah(idx + 1);
+        // Gapless handoff to the preloaded standby element.
+        advancePlaylist();
         return;
       }
       // Last ayah finished — fall through to the chapter-end logic below.
@@ -850,13 +970,26 @@ export default function QuranProjectPage() {
     surahTimerEnabled,
     autoStopTimer,
     playPlaylistAyah,
+    advancePlaylist,
   ]);
+
+  // Mirror handleSurahEnded into a ref so the secondary audio element's
+  // imperative listener (attached once in the init effect) always invokes
+  // the latest closure with current state/deps.
+  handleSurahEndedRef.current = handleSurahEnded;
 
   const startPlayback = useCallback(() => {
     // Reset session state — critical for random mode so mood pool picks fresh
     surahDataRef.current = null;
     nextSurahDataRef.current = null;
     playedSurahsRef.current = [];
+    activePlaylistAudioRef.current = "A";
+    playlistIndexRef.current = 0;
+    const b = audioBRef.current;
+    if (b) {
+      b.pause();
+      b.removeAttribute("src");
+    }
 
     let startSurah;
     if (mode === "surah") {
@@ -872,15 +1005,21 @@ export default function QuranProjectPage() {
     loadAndPlaySurah(startSurah);
   }, [mode, selectedSurah, pickNextRandomSurah, loadAndPlaySurah]);
 
-  // Pause/resume: toggle the audio element directly
+  // Pause/resume: toggle the audio element directly. In playlist mode we
+  // operate on whichever element (A or B) is the current live one — the
+  // standby stays paused/preloading regardless.
   useEffect(() => {
-    const el = audioRef.current;
-    if (el) {
-      if (isPlaying) {
-        el.play().catch((e) => console.error("Playback error:", e));
-      } else {
-        el.pause();
-      }
+    const sd = surahDataRef.current;
+    const el = sd?.isPlaylist
+      ? activePlaylistAudioRef.current === "A"
+        ? audioRef.current
+        : audioBRef.current
+      : audioRef.current;
+    if (!el) return;
+    if (isPlaying) {
+      el.play().catch((e) => console.error("Playback error:", e));
+    } else {
+      el.pause();
     }
   }, [isPlaying]);
 
@@ -941,6 +1080,13 @@ export default function QuranProjectPage() {
       el.removeAttribute("src");
       el.load();
     }
+    const b = audioBRef.current;
+    if (b) {
+      b.pause();
+      b.removeAttribute("src");
+    }
+    activePlaylistAudioRef.current = "A";
+    playlistIndexRef.current = 0;
     surahDataRef.current = null;
     nextSurahDataRef.current = null;
     setCurrentAyah(null);
@@ -961,6 +1107,13 @@ export default function QuranProjectPage() {
     surahDataRef.current = null;
     nextSurahDataRef.current = null;
     playedSurahsRef.current = [];
+    activePlaylistAudioRef.current = "A";
+    playlistIndexRef.current = 0;
+    const b = audioBRef.current;
+    if (b) {
+      b.pause();
+      b.removeAttribute("src");
+    }
     useElapsedStore.getState().reset();
     setStartTime(Date.now());
     setView("playing");
