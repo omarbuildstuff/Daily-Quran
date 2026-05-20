@@ -532,10 +532,14 @@ export default function QuranProjectPage() {
     const sd = surahDataRef.current;
     if (!el || !sd) return;
     const currentMs = el.currentTime * 1000;
-    // Find the verse whose time range contains currentMs
+    // Find the verse whose time range contains currentMs. When nothing
+    // matches, clamp: before verse 1 (Bismillah pre-roll on surahs 2+) stays
+    // on verse 1, past the last verse stays on the last verse.
+    const first = sd.verses[0];
+    const last = sd.verses[sd.verses.length - 1];
     const active =
       sd.verses.find((v) => currentMs >= v.startMs && currentMs < v.endMs) ||
-      sd.verses[sd.verses.length - 1]; // fallback to last verse at end
+      (currentMs < first.startMs ? first : last);
     if (!active) return;
     // Update state only if it changed
     setCurrentAyah((prev) => {
