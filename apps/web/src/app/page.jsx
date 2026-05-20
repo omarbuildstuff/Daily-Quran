@@ -58,22 +58,19 @@ const RECITERS = [
   { id: 4, name: "Abu Bakr Ash-Shatri" },
   { id: 13, name: "Saad Al-Ghamdi" },
   { id: 161, name: "Khalifah Al-Tunaiji" },
-  // Per-ayah reciters: each verse is its own MP3 served by everyayah.com.
-  // The player switches to a dual-<audio> ping-pong path that preloads the
-  // next ayah while the current is playing, for gapless verse transitions.
-  // quran.com's chapter_recitations pairs audio from one recording with
-  // timestamps from another for these two, so we don't use that endpoint.
+  // Fares uses quran.com's chapter_recitations endpoint (id 14) — a single MP3
+  // per surah with verse timestamps that match the audio exactly, so verse
+  // highlight works on a continuous chapter timeline with no per-ayah seams.
+  // Word-level segments aren't shipped for him, so word karaoke is unavailable.
+  { id: 14, name: "Fares Abbad" },
+  // Maher uses everyayah per-ayah audio because quran.com's chapter_recitations
+  // for him pair audio from one recording with timestamps from another. The
+  // dual-<audio> path below preloads the next ayah for gapless handoff.
   {
     id: 159,
     name: "Maher al-Muaiqly",
     source: "everyayah",
     everyayahFolder: "MaherAlMuaiqly128kbps",
-  },
-  {
-    id: 14,
-    name: "Fares Abbad",
-    source: "everyayah",
-    everyayahFolder: "Fares_Abbad_64kbps",
   },
 ];
 
