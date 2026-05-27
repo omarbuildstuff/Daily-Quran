@@ -580,7 +580,8 @@ export default function QuranProjectPage() {
       updateCurrentVerse();
 
       // Memorization mode — loop or stop at end of selected verse range.
-      // Takes priority over the duration timer.
+      // If the session timer is also on, whichever boundary hits first wins
+      // (timer can cut a memorization loop short instead of looping forever).
       if (mode === "surah" && memorizationEnabled) {
         const el = audioRef.current;
         const sd = surahDataRef.current;
@@ -589,16 +590,23 @@ export default function QuranProjectPage() {
         const endV = sd.verses.find((v) => v.num === Number(memEndVerse));
         if (!startV || !endV) return;
         const currentMs = el.currentTime * 1000;
+
+        const timerActive =
+          autoStopTimer && surahTimerEnabled && (Date.now() - startTime) / 1000 >= targetDuration;
+
         if (currentMs >= endV.endMs - 60) {
-          if (memRepeat) {
-            el.currentTime = startV.startMs / 1000;
-          } else {
+          // At the loop boundary: stop if timer expired or repeat is off,
+          // otherwise jump back to startV for another pass.
+          if (timerActive || !memRepeat) {
             el.pause();
             setView("finished");
             setIsPlaying(false);
+          } else {
+            el.currentTime = startV.startMs / 1000;
           }
         }
-        return; // skip duration-timer logic when memorizing
+        return; // memorization owns its own end conditions; skip the
+                // non-memorization timer block below.
       }
 
       // Timer-based end condition (random mode OR surah mode with optional timer enabled)
@@ -887,14 +895,23 @@ export default function QuranProjectPage() {
       const currentNum = sd.playlist[idx]?.num;
 
       if (mode === "surah" && memorizationEnabled && memStart > 0 && memEnd > 0) {
+        const timerExpired =
+          autoStopTimer && surahTimerEnabled && (Date.now() - startTime) / 1000 >= targetDuration;
         if (currentNum >= memEnd) {
-          if (memRepeat) {
-            const startIdx = sd.playlist.findIndex((p) => p.num === memStart);
-            // Loop point isn't preloaded (we only preload N+1), so this jump
-            // can have a small gap — acceptable for the repeat boundary.
-            playPlaylistAyah(startIdx >= 0 ? startIdx : 0);
+          // Stop if timer expired or repeat is off, otherwise loop back to startV.
+          if (timerExpired || !memRepeat) {
+            setView("finished");
+            setIsPlaying(false);
             return;
           }
+          const startIdx = sd.playlist.findIndex((p) => p.num === memStart);
+          // Loop point isn't preloaded (we only preload N+1), so this jump
+          // can have a small gap — acceptable for the repeat boundary.
+          playPlaylistAyah(startIdx >= 0 ? startIdx : 0);
+          return;
+        }
+        if (timerExpired) {
+          // Mid-loop, timer ran out — stop at the next ayah boundary.
           setView("finished");
           setIsPlaying(false);
           return;
@@ -1261,11 +1278,13 @@ export default function QuranProjectPage() {
     setHoveredWordPos(null);
   }, [currentAyah?.key]);
 
-  // On mount, check if there's a recent (<24h) session bookmark — if so,
-  // surface a one-tap "Resume" prompt. Hidden until the user has actually
-  // listened past verse 1 (so refreshing the setup view doesn't trigger it).
+  // On mount, surface a one-tap "Resume" prompt if there's a recent session
+  // bookmark. The window is 7 days — a "yesterday" listen on a daily app is
+  // commonly 25+ hours out, so the older 24h cutoff hid the prompt for the
+  // exact use case it's meant for.
   useEffect(() => {
-    if (lastSession && lastSession.savedAt && Date.now() - lastSession.savedAt < 24 * 60 * 60 * 1000) {
+    const RESUME_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+    if (lastSession && lastSession.savedAt && Date.now() - lastSession.savedAt < RESUME_WINDOW_MS) {
       setShowResumePrompt(true);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
