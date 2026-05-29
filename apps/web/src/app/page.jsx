@@ -580,8 +580,6 @@ export default function QuranProjectPage() {
       updateCurrentVerse();
 
       // Memorization mode — loop or stop at end of selected verse range.
-      // If the session timer is also on, whichever boundary hits first wins
-      // (timer can cut a memorization loop short instead of looping forever).
       if (mode === "surah" && memorizationEnabled) {
         const el = audioRef.current;
         const sd = surahDataRef.current;
@@ -591,22 +589,34 @@ export default function QuranProjectPage() {
         if (!startV || !endV) return;
         const currentMs = el.currentTime * 1000;
 
-        const timerActive =
+        // Session timer takes priority and is checked on every tick (not just
+        // at the loop boundary) — otherwise a long passage or repeat-off range
+        // would run well past the chosen duration. Stop at the next verse
+        // boundary so we don't cut mid-word; if we can't place the current
+        // verse, stop immediately.
+        const timerExpired =
           autoStopTimer && surahTimerEnabled && (Date.now() - startTime) / 1000 >= targetDuration;
-
-        if (currentMs >= endV.endMs - 60) {
-          // At the loop boundary: stop if timer expired or repeat is off,
-          // otherwise jump back to startV for another pass.
-          if (timerActive || !memRepeat) {
+        if (timerExpired) {
+          const active = sd.verses.find((v) => currentMs >= v.startMs && currentMs < v.endMs);
+          if (!active || active.endMs - currentMs <= 200) {
             el.pause();
             setView("finished");
             setIsPlaying(false);
-          } else {
+          }
+          return;
+        }
+
+        // No timer (or not yet expired): handle the memorization loop boundary.
+        if (currentMs >= endV.endMs - 60) {
+          if (memRepeat) {
             el.currentTime = startV.startMs / 1000;
+          } else {
+            el.pause();
+            setView("finished");
+            setIsPlaying(false);
           }
         }
-        return; // memorization owns its own end conditions; skip the
-                // non-memorization timer block below.
+        return; // memorization owns its end conditions; skip the timer block below.
       }
 
       // Timer-based end condition (random mode OR surah mode with optional timer enabled)
@@ -1279,15 +1289,24 @@ export default function QuranProjectPage() {
   }, [currentAyah?.key]);
 
   // On mount, surface a one-tap "Resume" prompt if there's a recent session
-  // bookmark. The window is 7 days — a "yesterday" listen on a daily app is
-  // commonly 25+ hours out, so the older 24h cutoff hid the prompt for the
-  // exact use case it's meant for.
+  // bookmark. We read localStorage directly rather than the `lastSession`
+  // state: usePersistentState seeds from the default (null) and only loads the
+  // stored value in a post-mount effect, so a []-deps effect reading the state
+  // would always see null and the prompt would never appear. Window is 7 days
+  // so a "yesterday" listen (commonly 25+ hours out) still qualifies.
   useEffect(() => {
-    const RESUME_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-    if (lastSession && lastSession.savedAt && Date.now() - lastSession.savedAt < RESUME_WINDOW_MS) {
-      setShowResumePrompt(true);
+    try {
+      const raw = window.localStorage.getItem(STORAGE_PREFIX + "lastSession");
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      const RESUME_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+      if (saved?.savedAt && Date.now() - saved.savedAt < RESUME_WINDOW_MS) {
+        setShowResumePrompt(true);
+      }
+    } catch {
+      // Ignore corrupt / privacy-mode reads
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Daily streak — increments on first verse play of a new local day.
   // Continues from yesterday → today; resets to 1 on a missed day.
