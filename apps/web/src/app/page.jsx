@@ -72,6 +72,19 @@ const RECITERS = [
     source: "everyayah",
     everyayahFolder: "MaherAlMuaiqly128kbps",
   },
+  // Mufti Menk is served by a self-hosted, quran.com-compatible API. Like a
+  // normal chapter reciter it's one continuous audio file per surah, but its
+  // verse timings live on a separate by_chapter endpoint, so fetchSurahData
+  // has a dedicated branch for the "custom-quran-api" source. Verse text and
+  // translation still come from the usual sources, so highlight/tooltips match
+  // every other reciter. Word-level segments aren't provided, so word karaoke
+  // is unavailable (same as the everyayah reciters).
+  {
+    id: 999,
+    name: "Mufti Menk",
+    source: "custom-quran-api",
+    baseUrl: "https://rpi.tailbdd157.ts.net",
+  },
 ];
 
 const DURATIONS = [
@@ -451,6 +464,79 @@ export default function QuranProjectPage() {
           verses,
           isPlaylist: true,
           playlist,
+        };
+      }
+
+      // Custom quran.com-compatible API (Mufti Menk). One continuous audio file
+      // per surah — so it flows through the normal single-<audio> path (gapless,
+      // scrubbable, verse highlight on a chapter timeline) — but the audio URL
+      // and per-verse timings come from this API's own endpoints rather than
+      // quran.com. Verse text/words still come from quran.com and translation
+      // from the fawaz CDN, so everything downstream behaves identically.
+      if (reciter?.source === "custom-quran-api") {
+        const base = reciter.baseUrl;
+        const [audioRes, timingRes, versesRes, translationsRes] = await Promise.all([
+          fetch(`${base}/api/v4/chapter_recitations/${reciter.id}/${surahId}`),
+          fetch(`${base}/api/v4/recitations/${reciter.id}/by_chapter/${surahId}`),
+          fetch(versesUrl),
+          fetch(translationsUrl),
+        ]);
+        if (!audioRes.ok) throw new Error(`Audio API error: ${audioRes.status}`);
+        if (!timingRes.ok) throw new Error(`Timing API error: ${timingRes.status}`);
+        if (!versesRes.ok) throw new Error(`Verse API error: ${versesRes.status}`);
+
+        const [audioJson, timingJson, versesData, translationsData] = await Promise.all([
+          audioRes.json(),
+          timingRes.json(),
+          versesRes.json(),
+          translationsRes.ok ? translationsRes.json() : null,
+        ]);
+        if (!audioJson.audio_file) throw new Error("Chapter audio not found");
+
+        const translationByVerse = buildTranslationMap(translationsData);
+        // Index this API's by_chapter timings by verse_key. Its `segments` are
+        // per-verse (not per-word), so we don't carry them — word karaoke stays
+        // off; verse-level highlight uses timestamp_from/to.
+        const timingByKey = {};
+        (timingJson.audio_files || []).forEach((a) => {
+          timingByKey[a.verse_key] = a;
+        });
+
+        const verses = versesData.verses.map((v) => {
+          const t = timingByKey[v.verse_key];
+          const words = (v.words || [])
+            .filter((w) => w.char_type_name === "word")
+            .map((w) => ({
+              position: w.position,
+              text: w.text_uthmani || w.text || "",
+              translation: w.translation?.text || "",
+              transliteration: w.transliteration?.text || "",
+            }));
+          return {
+            num: v.verse_number,
+            key: v.verse_key,
+            text: v.text_uthmani,
+            translation:
+              translationByVerse[v.verse_number] || "Translation not available",
+            startMs: t?.timestamp_from ?? 0,
+            endMs: t?.timestamp_to ?? 0,
+            segments: [],
+            words,
+          };
+        });
+
+        // Same degenerate-timestamp guard as the quran.com path.
+        verses.forEach((v, i) => {
+          if (v.endMs <= v.startMs) {
+            v.endMs = verses[i + 1]?.startMs ?? v.startMs + 5000;
+          }
+        });
+
+        return {
+          surah: surahId,
+          audioUrl: audioJson.audio_file.audio_url,
+          surahName,
+          verses,
         };
       }
 
