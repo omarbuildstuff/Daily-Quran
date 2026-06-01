@@ -1510,9 +1510,72 @@ export default function QuranProjectPage() {
     }
   }, []);
 
-  // Daily reminder — fires a real OS notification (and in-app banner) when
-  // the user hasn't listened yet and their chosen time has arrived.
-  // Checks every minute so it fires even if the app was already open.
+  // Does this browser support scheduling notifications that fire while the app
+  // is closed? (Notification Triggers API — Chromium/Android installed PWAs.)
+  const supportsNotificationTriggers = () =>
+    typeof window !== "undefined" &&
+    typeof Notification !== "undefined" &&
+    "showTrigger" in Notification.prototype &&
+    "TimestampTrigger" in window;
+
+  // Schedule the daily reminder as real OS-level notifications that fire even
+  // when the PWA is fully closed, via the service worker + Notification
+  // Triggers API. A purely in-app setInterval (below) can't fire when closed —
+  // which is the whole point of a daily reminder — so this is the primary path
+  // on browsers that support it. We schedule the next two weeks of occurrences
+  // (triggers are one-shot) and top this up every time the app is opened.
+  const scheduleTriggeredReminders = useCallback(
+    async (enabledOverride) => {
+    if (!("serviceWorker" in navigator)) return false;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted")
+      return false;
+    if (!supportsNotificationTriggers()) return false;
+    const enabled = enabledOverride ?? reminderEnabled;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      // Clear any reminders we previously scheduled before re-scheduling.
+      const pending = await reg.getNotifications({ includeTriggered: true });
+      pending
+        .filter((n) => (n.tag || "").startsWith("daily-reminder-"))
+        .forEach((n) => n.close());
+
+      if (!enabled || !reminderTime) return true;
+
+      const [h, m] = reminderTime.split(":").map(Number);
+      const now = Date.now();
+      for (let i = 0; i < 14; i++) {
+        const t = new Date();
+        t.setDate(t.getDate() + i);
+        t.setHours(h, m, 0, 0);
+        const ts = t.getTime();
+        if (ts <= now) continue; // skip today if the time already passed
+        await reg.showNotification("Time for your daily Quran 🤲", {
+          body: "Take a few minutes to listen.",
+          icon: "/android-chrome-192x192.png",
+          badge: "/android-chrome-192x192.png",
+          tag: `daily-reminder-${t.toISOString().slice(0, 10)}`,
+          showTrigger: new window.TimestampTrigger(ts),
+        });
+      }
+      return true;
+    } catch {
+      return false;
+    }
+    },
+    [reminderEnabled, reminderTime],
+  );
+
+  // (Re)schedule the closed-app reminders whenever the setting changes or the
+  // app is opened (to extend the rolling two-week window).
+  useEffect(() => {
+    scheduleTriggeredReminders();
+  }, [scheduleTriggeredReminders]);
+
+  // In-app fallback — fires a real OS notification (and in-app banner) when the
+  // user hasn't listened yet and their chosen time has arrived. Only runs while
+  // the app is open; on browsers that support Notification Triggers the OS
+  // notification is already scheduled above, so here we only raise the in-app
+  // banner and skip the (duplicate) manual notification.
   useEffect(() => {
     if (!reminderEnabled || !reminderTime) return;
 
@@ -1529,6 +1592,10 @@ export default function QuranProjectPage() {
 
       shownTodayRef.current = todayStr;
       setShowReminderBanner(true);
+
+      // The OS notification is handled by the scheduled trigger when supported —
+      // avoid firing a duplicate here.
+      if (supportsNotificationTriggers()) return;
 
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
         try {
@@ -2698,6 +2765,10 @@ export default function QuranProjectPage() {
                         if (next && typeof Notification !== "undefined" && Notification.permission === "default") {
                           await Notification.requestPermission();
                         }
+                        // Schedule (or clear) closed-app reminders now that the
+                        // toggle and permission are settled — pass `next`
+                        // explicitly since state hasn't re-rendered yet.
+                        scheduleTriggeredReminders(next);
                       }}
                       className="w-full flex items-start justify-between gap-4 text-left"
                     >
