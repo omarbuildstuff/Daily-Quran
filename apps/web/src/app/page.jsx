@@ -72,19 +72,6 @@ const RECITERS = [
     source: "everyayah",
     everyayahFolder: "MaherAlMuaiqly128kbps",
   },
-  // Mufti Menk is served by a self-hosted, quran.com-compatible API. Like a
-  // normal chapter reciter it's one continuous audio file per surah, but its
-  // verse timings live on a separate by_chapter endpoint, so fetchSurahData
-  // has a dedicated branch for the "custom-quran-api" source. Verse text and
-  // translation still come from the usual sources, so highlight/tooltips match
-  // every other reciter. Word-level segments aren't provided, so word karaoke
-  // is unavailable (same as the everyayah reciters).
-  {
-    id: 999,
-    name: "Mufti Menk",
-    source: "custom-quran-api",
-    baseUrl: "https://rpi.tailbdd157.ts.net",
-  },
 ];
 
 const DURATIONS = [
@@ -92,6 +79,62 @@ const DURATIONS = [
   { label: "10 min", value: 10 * 60 },
   { label: "15 min", value: 15 * 60 },
 ];
+
+// The 30 ajzāʾ of the Quran as [startSurah, startAyah] → [endSurah, endAyah]
+// (standard Hafs mushaf boundaries). buildJuzSegments turns one of these into
+// an ordered list of per-surah verse ranges so the player can stream a full
+// juz surah by surah.
+const JUZ = [
+  { start: [1, 1], end: [2, 141] },
+  { start: [2, 142], end: [2, 252] },
+  { start: [2, 253], end: [3, 92] },
+  { start: [3, 93], end: [4, 23] },
+  { start: [4, 24], end: [4, 147] },
+  { start: [4, 148], end: [5, 81] },
+  { start: [5, 82], end: [6, 110] },
+  { start: [6, 111], end: [7, 87] },
+  { start: [7, 88], end: [8, 40] },
+  { start: [8, 41], end: [9, 92] },
+  { start: [9, 93], end: [11, 5] },
+  { start: [11, 6], end: [12, 52] },
+  { start: [12, 53], end: [14, 52] },
+  { start: [15, 1], end: [16, 128] },
+  { start: [17, 1], end: [18, 74] },
+  { start: [18, 75], end: [20, 135] },
+  { start: [21, 1], end: [22, 78] },
+  { start: [23, 1], end: [25, 20] },
+  { start: [25, 21], end: [27, 55] },
+  { start: [27, 56], end: [29, 45] },
+  { start: [29, 46], end: [33, 30] },
+  { start: [33, 31], end: [36, 27] },
+  { start: [36, 28], end: [39, 31] },
+  { start: [39, 32], end: [41, 46] },
+  { start: [41, 47], end: [45, 37] },
+  { start: [46, 1], end: [51, 30] },
+  { start: [51, 31], end: [57, 29] },
+  { start: [58, 1], end: [66, 12] },
+  { start: [67, 1], end: [77, 50] },
+  { start: [78, 1], end: [114, 6] },
+];
+
+// Expand a juz (1-based) into ordered { surah, startVerse, endVerse } segments.
+// Middle surahs play in full; only the first and last are partial.
+const buildJuzSegments = (juzNum) => {
+  const j = JUZ[juzNum - 1];
+  if (!j) return [];
+  const [sStart, aStart] = j.start;
+  const [sEnd, aEnd] = j.end;
+  const segs = [];
+  for (let s = sStart; s <= sEnd; s++) {
+    const versesCount = chapters.find((c) => c.id === s)?.verses_count || 1;
+    segs.push({
+      surah: s,
+      startVerse: s === sStart ? aStart : 1,
+      endVerse: s === sEnd ? aEnd : versesCount,
+    });
+  }
+  return segs;
+};
 
 // Curated surah recommendations per mood/intention
 const MOODS = [
@@ -162,13 +205,21 @@ const ElapsedReadout = React.memo(function ElapsedReadout({
   targetDuration,
 }) {
   const elapsed = useElapsedStore((s) => s.elapsed);
+  // Verse readout for surah-without-timer AND juz mode (both follow a verse,
+  // not a clock). The surah is taken from the playing verse so juz shows the
+  // right total as it moves across surahs.
+  const verseReadout =
+    currentAyah && ((mode === "surah" && !surahTimerEnabled) || mode === "juz");
+  const curSurahId = currentAyah
+    ? Number(currentAyah.key.split(":")[0])
+    : selectedSurah;
   return (
     <div className="flex-1 text-right font-mono tracking-tighter text-lg font-bold">
-      {mode === "surah" && !surahTimerEnabled && currentAyah ? (
+      {verseReadout ? (
         <span>
           {currentAyah.key.split(":")[1]}
           <span className="text-warm-400"> / </span>
-          {chapters.find((c) => c.id === selectedSurah)?.verses_count || "?"}
+          {chapters.find((c) => c.id === curSurahId)?.verses_count || "?"}
           <span className="block text-[10px] uppercase tracking-widest text-warm-400 font-bold mt-0.5">
             Verse
           </span>
@@ -196,9 +247,16 @@ const ProgressTrack = React.memo(function ProgressTrack({
   playPlaylistAyah,
 }) {
   const elapsed = useElapsedStore((s) => s.elapsed);
-  const surahMode = mode === "surah" && !surahTimerEnabled && currentAyah;
+  // Verse-positioned bar for surah-without-timer AND juz mode; the surah (and
+  // thus the verse total) is read from the playing verse so it stays correct
+  // as juz mode crosses surah boundaries.
+  const surahMode =
+    currentAyah && ((mode === "surah" && !surahTimerEnabled) || mode === "juz");
+  const curSurahId = currentAyah
+    ? Number(currentAyah.key.split(":")[0])
+    : selectedSurah;
   const versesCount =
-    chapters.find((c) => c.id === selectedSurah)?.verses_count || 1;
+    chapters.find((c) => c.id === curSurahId)?.verses_count || 1;
   const ratio = surahMode
     ? Number(currentAyah.key.split(":")[1]) / versesCount
     : Math.min(1, elapsed / targetDuration);
@@ -280,8 +338,9 @@ export default function QuranProjectPage() {
   const [loading, setLoading] = useState(false);
   const [customMinutes, setCustomMinutes] = useState("");
   const [error, setError] = useState(null);
-  const [mode, setMode] = usePersistentState("mode", "random"); // 'random' | 'surah'
+  const [mode, setMode] = usePersistentState("mode", "random"); // 'random' | 'surah' | 'juz'
   const [selectedSurah, setSelectedSurah] = usePersistentState("selectedSurah", 1);
+  const [selectedJuz, setSelectedJuz] = usePersistentState("selectedJuz", 1);
   const [selectedMood, setSelectedMood] = usePersistentState("selectedMood", "fear");
   const [moodEnabled, setMoodEnabled] = usePersistentState("moodEnabled", false);
   const [surahTimerEnabled, setSurahTimerEnabled] = usePersistentState("surahTimerEnabled", false);
@@ -337,6 +396,15 @@ export default function QuranProjectPage() {
   // Index into surahDataRef.current.playlist for per-ayah reciters.
   // Unused when surahData.isPlaylist is false.
   const playlistIndexRef = useRef(0);
+  // Juz mode: ordered { surah, startVerse, endVerse } segments for the selected
+  // juz, the index of the segment currently playing, and a guard so the
+  // surah-to-surah handoff can't be triggered twice while the next surah loads.
+  const juzSegmentsRef = useRef([]);
+  const juzIndexRef = useRef(0);
+  const juzAdvancingRef = useRef(false);
+  // advanceJuz is defined below handleTimeUpdate, so the tick reaches it through
+  // this ref (assigned after advanceJuz exists) to avoid a render-time TDZ.
+  const advanceJuzRef = useRef(() => {});
   // Second audio element used only in playlist mode for gapless verse handoff.
   // Created imperatively in an effect so we don't add it to the JSX tree —
   // chapter_recitations reciters never touch it. The ended listener routes
@@ -467,79 +535,6 @@ export default function QuranProjectPage() {
         };
       }
 
-      // Custom quran.com-compatible API (Mufti Menk). One continuous audio file
-      // per surah — so it flows through the normal single-<audio> path (gapless,
-      // scrubbable, verse highlight on a chapter timeline) — but the audio URL
-      // and per-verse timings come from this API's own endpoints rather than
-      // quran.com. Verse text/words still come from quran.com and translation
-      // from the fawaz CDN, so everything downstream behaves identically.
-      if (reciter?.source === "custom-quran-api") {
-        const base = reciter.baseUrl;
-        const [audioRes, timingRes, versesRes, translationsRes] = await Promise.all([
-          fetch(`${base}/api/v4/chapter_recitations/${reciter.id}/${surahId}`),
-          fetch(`${base}/api/v4/recitations/${reciter.id}/by_chapter/${surahId}`),
-          fetch(versesUrl),
-          fetch(translationsUrl),
-        ]);
-        if (!audioRes.ok) throw new Error(`Audio API error: ${audioRes.status}`);
-        if (!timingRes.ok) throw new Error(`Timing API error: ${timingRes.status}`);
-        if (!versesRes.ok) throw new Error(`Verse API error: ${versesRes.status}`);
-
-        const [audioJson, timingJson, versesData, translationsData] = await Promise.all([
-          audioRes.json(),
-          timingRes.json(),
-          versesRes.json(),
-          translationsRes.ok ? translationsRes.json() : null,
-        ]);
-        if (!audioJson.audio_file) throw new Error("Chapter audio not found");
-
-        const translationByVerse = buildTranslationMap(translationsData);
-        // Index this API's by_chapter timings by verse_key. Its `segments` are
-        // per-verse (not per-word), so we don't carry them — word karaoke stays
-        // off; verse-level highlight uses timestamp_from/to.
-        const timingByKey = {};
-        (timingJson.audio_files || []).forEach((a) => {
-          timingByKey[a.verse_key] = a;
-        });
-
-        const verses = versesData.verses.map((v) => {
-          const t = timingByKey[v.verse_key];
-          const words = (v.words || [])
-            .filter((w) => w.char_type_name === "word")
-            .map((w) => ({
-              position: w.position,
-              text: w.text_uthmani || w.text || "",
-              translation: w.translation?.text || "",
-              transliteration: w.transliteration?.text || "",
-            }));
-          return {
-            num: v.verse_number,
-            key: v.verse_key,
-            text: v.text_uthmani,
-            translation:
-              translationByVerse[v.verse_number] || "Translation not available",
-            startMs: t?.timestamp_from ?? 0,
-            endMs: t?.timestamp_to ?? 0,
-            segments: [],
-            words,
-          };
-        });
-
-        // Same degenerate-timestamp guard as the quran.com path.
-        verses.forEach((v, i) => {
-          if (v.endMs <= v.startMs) {
-            v.endMs = verses[i + 1]?.startMs ?? v.startMs + 5000;
-          }
-        });
-
-        return {
-          surah: surahId,
-          audioUrl: audioJson.audio_file.audio_url,
-          surahName,
-          verses,
-        };
-      }
-
       const [chapterAudioRes, versesRes, translationsRes] = await Promise.all([
         fetch(
           `https://api.quran.com/api/v4/chapter_recitations/${reciterId}/${surahId}?segments=true`,
@@ -664,6 +659,22 @@ export default function QuranProjectPage() {
       if (surahDataRef.current?.isPlaylist) return;
 
       updateCurrentVerse();
+
+      // Juz mode — when the current surah reaches this segment's end verse,
+      // hand off to the next surah of the juz (or finish on the last one).
+      if (mode === "juz") {
+        const el = audioRef.current;
+        const sd = surahDataRef.current;
+        const seg = juzSegmentsRef.current[juzIndexRef.current];
+        if (!el || !sd || !seg) return;
+        const endV = sd.verses.find((v) => v.num === seg.endVerse);
+        if (!endV) return;
+        const currentMs = el.currentTime * 1000;
+        if (currentMs >= endV.endMs - 60) {
+          advanceJuzRef.current();
+        }
+        return;
+      }
 
       // Memorization mode — loop or stop at end of selected verse range.
       if (mode === "surah" && memorizationEnabled) {
@@ -901,11 +912,16 @@ export default function QuranProjectPage() {
         surahDataRef.current = data;
         playlistIndexRef.current = 0;
 
-        // For memorization, the listener wants to start at a specific verse —
-        // pick that one instead of verse 1 for the immediate display.
+        // Pick the verse to start on. Memorization starts at the user's start
+        // verse; juz mode starts at the current segment's start verse (verse 1
+        // for every surah except the first one of the juz). Everything else
+        // starts at verse 1.
+        const juzSeg = mode === "juz" ? juzSegmentsRef.current[juzIndexRef.current] : null;
         const initialVerse =
           mode === "surah" && memorizationEnabled
             ? data.verses.find((v) => v.num === Number(memStartVerse)) || data.verses[0]
+            : juzSeg
+            ? data.verses.find((v) => v.num === juzSeg.startVerse) || data.verses[0]
             : data.verses[0];
 
         // Playlist reciters: pick the ayah index for the initial verse and
@@ -937,7 +953,10 @@ export default function QuranProjectPage() {
           el.src = data.audioUrl;
           el.load();
           const seekIfNeeded = () => {
-            if (mode === "surah" && memorizationEnabled && initialVerse) {
+            if (
+              initialVerse &&
+              ((mode === "surah" && memorizationEnabled) || mode === "juz")
+            ) {
               el.currentTime = initialVerse.startMs / 1000;
             }
           };
@@ -975,6 +994,30 @@ export default function QuranProjectPage() {
     ],
   );
 
+  // Juz mode: move to the next surah segment of the current juz, or finish if
+  // the last segment just ended. The guard prevents the time-update tick and
+  // the audio `ended` event from both firing this during the async surah load.
+  const advanceJuz = useCallback(async () => {
+    if (juzAdvancingRef.current) return;
+    juzAdvancingRef.current = true;
+    try {
+      const next = juzIndexRef.current + 1;
+      const segs = juzSegmentsRef.current;
+      if (next >= segs.length) {
+        audioRef.current?.pause();
+        audioBRef.current?.pause();
+        setView("finished");
+        setIsPlaying(false);
+        return;
+      }
+      juzIndexRef.current = next;
+      await loadAndPlaySurah(segs[next].surah);
+    } finally {
+      juzAdvancingRef.current = false;
+    }
+  }, [loadAndPlaySurah]);
+  advanceJuzRef.current = advanceJuz;
+
   // When the full surah audio naturally ends (via onEnded)
   const handleSurahEnded = useCallback(() => {
     const sd = surahDataRef.current;
@@ -989,6 +1032,21 @@ export default function QuranProjectPage() {
       const memStart = Number(memStartVerse);
       const memEnd = Number(memEndVerse);
       const currentNum = sd.playlist[idx]?.num;
+
+      // Juz mode (playlist reciter): advance to the next surah of the juz once
+      // this segment's end verse has played; otherwise continue to the next
+      // ayah within the surah via the gapless handoff.
+      if (mode === "juz") {
+        const seg = juzSegmentsRef.current[juzIndexRef.current];
+        if (seg && currentNum >= seg.endVerse) {
+          advanceJuz();
+        } else if (idx < last) {
+          advancePlaylist();
+        } else {
+          advanceJuz();
+        }
+        return;
+      }
 
       if (mode === "surah" && memorizationEnabled && memStart > 0 && memEnd > 0) {
         const timerExpired =
@@ -1039,6 +1097,15 @@ export default function QuranProjectPage() {
       // Last ayah finished — fall through to the chapter-end logic below.
     }
 
+    // Juz mode (single-audio reciter): the file ended on this segment's last
+    // verse — move to the next surah of the juz (advanceJuz finishes the
+    // session if this was the final segment). The time-update tick usually
+    // triggers this a hair earlier; the guard in advanceJuz dedupes.
+    if (mode === "juz") {
+      advanceJuz();
+      return;
+    }
+
     if (mode === "surah") {
       // Memorization with repeat — loop back to the start verse instead of finishing
       if (memorizationEnabled && memRepeat) {
@@ -1085,6 +1152,7 @@ export default function QuranProjectPage() {
     autoStopTimer,
     playPlaylistAyah,
     advancePlaylist,
+    advanceJuz,
   ]);
 
   // Mirror handleSurahEnded into a ref so the secondary audio element's
@@ -1104,10 +1172,16 @@ export default function QuranProjectPage() {
       b.pause();
       b.removeAttribute("src");
     }
+    juzAdvancingRef.current = false;
 
     let startSurah;
     if (mode === "surah") {
       startSurah = selectedSurah;
+    } else if (mode === "juz") {
+      const segs = buildJuzSegments(selectedJuz);
+      juzSegmentsRef.current = segs;
+      juzIndexRef.current = 0;
+      startSurah = segs[0]?.surah || 1;
     } else {
       startSurah = pickNextRandomSurah();
     }
@@ -1117,7 +1191,7 @@ export default function QuranProjectPage() {
     setView("playing");
     setIsPlaying(true);
     loadAndPlaySurah(startSurah);
-  }, [mode, selectedSurah, pickNextRandomSurah, loadAndPlaySurah]);
+  }, [mode, selectedSurah, selectedJuz, pickNextRandomSurah, loadAndPlaySurah]);
 
   // Pause/resume: toggle the audio element directly. In playlist mode we
   // operate on whichever element (A or B) is the current live one — the
@@ -1673,6 +1747,8 @@ export default function QuranProjectPage() {
                   <p className="text-xl text-warm-500 max-w-sm leading-relaxed font-normal">
                     {mode === "surah"
                       ? "Pick a surah. Listen from the first verse to the last."
+                      : mode === "juz"
+                      ? "Pick a juz. Listen to all its surahs, start to finish."
                       : "Choose how long and who recites. We'll never cut off mid-verse."}
                   </p>
                 </div>
@@ -1682,7 +1758,7 @@ export default function QuranProjectPage() {
                   <div className="flex gap-1 bg-warm-100 rounded-2xl p-1">
                     <button
                       onClick={() => setMode("random")}
-                      className={`flex-1 py-3 rounded-xl text-sm font-bold transition duration-300 ${
+                      className={`flex-1 py-3 px-1 rounded-xl text-xs sm:text-sm font-bold leading-tight transition duration-300 ${
                         mode === "random"
                           ? "bg-white text-black shadow-sm"
                           : "text-warm-400 hover:text-warm-500"
@@ -1692,13 +1768,23 @@ export default function QuranProjectPage() {
                     </button>
                     <button
                       onClick={() => setMode("surah")}
-                      className={`flex-1 py-3 rounded-xl text-sm font-bold transition duration-300 ${
+                      className={`flex-1 py-3 px-1 rounded-xl text-xs sm:text-sm font-bold leading-tight transition duration-300 ${
                         mode === "surah"
                           ? "bg-white text-black shadow-sm"
                           : "text-warm-400 hover:text-warm-500"
                       }`}
                     >
                       Choose Surah
+                    </button>
+                    <button
+                      onClick={() => setMode("juz")}
+                      className={`flex-1 py-3 px-1 rounded-xl text-xs sm:text-sm font-bold leading-tight transition duration-300 ${
+                        mode === "juz"
+                          ? "bg-white text-black shadow-sm"
+                          : "text-warm-400 hover:text-warm-500"
+                      }`}
+                    >
+                      Choose Juz
                     </button>
                   </div>
 
@@ -1975,6 +2061,47 @@ export default function QuranProjectPage() {
                           })()}
                         </AnimatePresence>
                       </motion.div>
+                    ) : mode === "juz" ? (
+                      <motion.div
+                        key="juz-picker"
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -12 }}
+                        transition={{ duration: 0.25, ease: "easeOut" }}
+                        className="space-y-4"
+                      >
+                        <div className="flex items-center gap-2 text-warm-400">
+                          <Bi name="chevron-right" size={14} />
+                          <label className="text-xs font-mono uppercase tracking-widest">
+                            Which juz?
+                          </label>
+                        </div>
+                        <div className="relative">
+                          <select
+                            value={selectedJuz}
+                            onChange={(e) => setSelectedJuz(Number(e.target.value))}
+                            className="w-full appearance-none bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-bold focus:outline-none focus:ring-2 focus:ring-black/10 cursor-pointer"
+                          >
+                            {JUZ.map((j, i) => {
+                              const startName =
+                                chapters.find((c) => c.id === j.start[0])?.name_simple || "";
+                              return (
+                                <option key={i + 1} value={i + 1}>
+                                  Juz {i + 1} — {startName} {j.start[0]}:{j.start[1]}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          <Bi
+                            name="chevron-right"
+                            size={18}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-warm-400 rotate-90 pointer-events-none"
+                          />
+                        </div>
+                        <p className="text-[11px] text-warm-400 leading-snug">
+                          Plays the full juz, surah by surah, from beginning to end.
+                        </p>
+                      </motion.div>
                     ) : (
                       <motion.div
                         key="duration-picker"
@@ -2183,16 +2310,26 @@ export default function QuranProjectPage() {
                         Loading recitation
                       </p>
                       <p className="text-2xl font-resolide font-bold tracking-tight">
-                        {chapters.find(
-                          (c) =>
-                            c.id ===
-                            (mode === "surah"
-                              ? selectedSurah
-                              : surahDataRef.current?.surah),
-                        )?.name_simple ||
-                          (mode === "surah"
-                            ? chapters.find((c) => c.id === selectedSurah)?.name_simple
-                            : "Random surah")}
+                        {(() => {
+                          if (mode === "surah") {
+                            return (
+                              chapters.find((c) => c.id === selectedSurah)?.name_simple ||
+                              "Surah"
+                            );
+                          }
+                          if (mode === "juz") {
+                            const seg = juzSegmentsRef.current[juzIndexRef.current];
+                            const sid = surahDataRef.current?.surah || seg?.surah;
+                            return (
+                              chapters.find((c) => c.id === sid)?.name_simple ||
+                              `Juz ${selectedJuz}`
+                            );
+                          }
+                          return (
+                            chapters.find((c) => c.id === surahDataRef.current?.surah)
+                              ?.name_simple || "Random surah"
+                          );
+                        })()}
                       </p>
                       <p className="text-sm text-warm-500">
                         {RECITERS.find((r) => r.id === reciterId)?.name}
@@ -2434,6 +2571,8 @@ export default function QuranProjectPage() {
                       ? `${targetDuration / 60} minutes with Surah ${chapters.find((c) => c.id === selectedSurah)?.name_simple || ""}. May Allah bless your consistency.`
                       : mode === "surah"
                       ? `Surah ${chapters.find((c) => c.id === selectedSurah)?.name_simple || ""}, beginning to end. May Allah bless your consistency.`
+                      : mode === "juz"
+                      ? `Juz ${selectedJuz}, beginning to end. May Allah bless your consistency.`
                       : `${targetDuration / 60} minutes with the words of Allah. May He bless your consistency.`}
                   </p>
                 </div>
