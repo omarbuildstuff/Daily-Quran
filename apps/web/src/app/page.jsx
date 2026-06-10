@@ -1609,7 +1609,7 @@ export default function QuranProjectPage() {
                           willChange: "transform",
                         }}
                       />
-                      <h2 className="font-resolide text-4xl md:text-6xl font-bold leading-[1.1] tracking-tight">
+                      <h2 className="font-resolide text-5xl md:text-7xl font-bold leading-[1.1] tracking-tight">
                         {greeting.line1} <br />
                         {greeting.line2}
                       </h2>
