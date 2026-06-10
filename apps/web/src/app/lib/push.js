@@ -13,11 +13,21 @@ const urlBase64ToUint8Array = (base64String) => {
   }
 };
 
+const isIos = () =>
+  typeof window !== "undefined" &&
+  /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+const isStandalone = () =>
+  typeof window !== "undefined" &&
+  (window.navigator.standalone === true ||
+    window.matchMedia("(display-mode: standalone)").matches);
+
 export const pushSupported = () =>
   typeof window !== "undefined" &&
   "serviceWorker" in navigator &&
   "PushManager" in window &&
-  typeof Notification !== "undefined";
+  typeof Notification !== "undefined" &&
+  (!isIos() || isStandalone());
 
 export const getPushSubscription = async () => {
   if (!pushSupported()) return null;
@@ -43,10 +53,14 @@ export const ensurePushSubscription = async () => {
   if (!res.ok) throw new Error("Push notifications aren't set up on the server yet.");
   const { publicKey } = await res.json();
   if (!publicKey) throw new Error("Push notifications aren't configured correctly on the server.");
-  return reg.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(publicKey),
-  });
+  try {
+    return await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+  } catch {
+    throw new Error("Push notifications aren't configured correctly on the server.");
+  }
 };
 
 // Persist the subscription + reminder schedule server-side.
