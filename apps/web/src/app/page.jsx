@@ -2627,27 +2627,6 @@ export default function QuranProjectPage() {
 
                         {reminderAnchor !== "clock" ? (
                           <>
-                            <div>
-                              <p className="text-xs font-mono uppercase tracking-widest text-warm-400 mb-2">
-                                How long after the adhan?
-                              </p>
-                              <div className="flex gap-1.5">
-                                {[0, 15, 30, 60].map((min) => (
-                                  <button
-                                    key={min}
-                                    onClick={() => setReminderOffset(min)}
-                                    className={`flex-1 py-2 rounded-xl text-sm font-bold transition border ${
-                                      reminderOffset === min
-                                        ? "bg-black text-white border-black"
-                                        : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
-                                    }`}
-                                  >
-                                    {min === 0 ? "Right away" : `+${min}m`}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-
                             {reminderLocation ? (
                               <div className="flex items-center justify-between gap-3 bg-warm-50 border border-warm-200 rounded-xl px-4 py-3">
                                 <p className="text-sm text-warm-700">

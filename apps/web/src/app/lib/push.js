@@ -3,10 +3,14 @@
 // app is closed.
 
 const urlBase64ToUint8Array = (base64String) => {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const raw = window.atob(base64);
-  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+  try {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = window.atob(base64);
+    return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+  } catch {
+    throw new Error("Push notifications aren't configured correctly on the server.");
+  }
 };
 
 export const pushSupported = () =>
@@ -36,8 +40,9 @@ export const ensurePushSubscription = async () => {
   if (existing) return existing;
 
   const res = await fetch("/api/push/public-key");
-  if (!res.ok) throw new Error("Push isn't configured on the server yet.");
+  if (!res.ok) throw new Error("Push notifications aren't set up on the server yet.");
   const { publicKey } = await res.json();
+  if (!publicKey) throw new Error("Push notifications aren't configured correctly on the server.");
   return reg.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey: urlBase64ToUint8Array(publicKey),
