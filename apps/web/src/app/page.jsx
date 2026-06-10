@@ -93,6 +93,56 @@ const DURATIONS = [
 
 // Emotional first-aid — each feeling maps to a curated pool of FULL surahs
 // that speak to it. Pools are bigger than the old lists, and recently played
+const JUZ = [
+  { start: [1, 1], end: [2, 141] },
+  { start: [2, 142], end: [2, 252] },
+  { start: [2, 253], end: [3, 92] },
+  { start: [3, 93], end: [4, 23] },
+  { start: [4, 24], end: [4, 147] },
+  { start: [4, 148], end: [5, 81] },
+  { start: [5, 82], end: [6, 110] },
+  { start: [6, 111], end: [7, 87] },
+  { start: [7, 88], end: [8, 40] },
+  { start: [8, 41], end: [9, 92] },
+  { start: [9, 93], end: [11, 5] },
+  { start: [11, 6], end: [12, 52] },
+  { start: [12, 53], end: [14, 52] },
+  { start: [15, 1], end: [16, 128] },
+  { start: [17, 1], end: [18, 74] },
+  { start: [18, 75], end: [20, 135] },
+  { start: [21, 1], end: [22, 78] },
+  { start: [23, 1], end: [25, 20] },
+  { start: [25, 21], end: [27, 55] },
+  { start: [27, 56], end: [29, 45] },
+  { start: [29, 46], end: [33, 30] },
+  { start: [33, 31], end: [36, 27] },
+  { start: [36, 28], end: [39, 31] },
+  { start: [39, 32], end: [41, 46] },
+  { start: [41, 47], end: [45, 37] },
+  { start: [46, 1], end: [51, 30] },
+  { start: [51, 31], end: [57, 29] },
+  { start: [58, 1], end: [66, 12] },
+  { start: [67, 1], end: [77, 50] },
+  { start: [78, 1], end: [114, 6] },
+];
+
+const buildJuzSegments = (juzNum) => {
+  const j = JUZ[juzNum - 1];
+  if (!j) return [];
+  const [sStart, aStart] = j.start;
+  const [sEnd, aEnd] = j.end;
+  const segs = [];
+  for (let s = sStart; s <= sEnd; s++) {
+    const versesCount = chapters.find((c) => c.id === s)?.verses_count || 1;
+    segs.push({
+      surah: s,
+      startVerse: s === sStart ? aStart : 1,
+      endVerse: s === sEnd ? aEnd : versesCount,
+    });
+  }
+  return segs;
+};
+
 // surahs are remembered across sessions (see moodHistory) so back-to-back
 // days with the same feeling don't serve the same surahs.
 // `promise` is a one-line translated verse shown when the feeling is picked.
@@ -469,6 +519,7 @@ export default function QuranProjectPage() {
   const [error, setError] = useState(null);
   const [mode, setMode] = usePersistentState("mode", "random"); // 'random' | 'surah'
   const [selectedSurah, setSelectedSurah] = usePersistentState("selectedSurah", 1);
+  const [selectedJuz, setSelectedJuz] = usePersistentState("selectedJuz", 1);
   const [selectedMood, setSelectedMood] = usePersistentState("selectedMood", "anxious");
   const [moodEnabled, setMoodEnabled] = usePersistentState("moodEnabled", false);
   // Recently played passages per mood — `{ [moodId]: string[] }` of passage
