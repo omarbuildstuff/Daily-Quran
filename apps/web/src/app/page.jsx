@@ -518,6 +518,7 @@ export default function QuranProjectPage() {
   const [customMinutes, setCustomMinutes] = useState("");
   const [error, setError] = useState(null);
   const [mode, setMode] = usePersistentState("mode", "random"); // 'random' | 'surah'
+  useEffect(() => { if (mode === "juz") setMode("random"); }, []); // juz tab hidden
   const [selectedSurah, setSelectedSurah] = usePersistentState("selectedSurah", 1);
   const [selectedJuz, setSelectedJuz] = usePersistentState("selectedJuz", 1);
   const [selectedMood, setSelectedMood] = usePersistentState("selectedMood", "anxious");
@@ -1699,16 +1700,6 @@ export default function QuranProjectPage() {
                       }`}
                     >
                       Choose Surah
-                    </button>
-                    <button
-                      onClick={() => setMode("juz")}
-                      className={`flex-1 py-3 px-1 rounded-xl text-xs sm:text-sm font-bold leading-tight transition duration-300 ${
-                        mode === "juz"
-                          ? "bg-white text-black shadow-sm"
-                          : "text-warm-400 hover:text-warm-500"
-                      }`}
-                    >
-                      Choose Juz
                     </button>
                   </div>
 
