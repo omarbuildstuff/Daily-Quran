@@ -1,4 +1,4 @@
-export async function GET() {
+export async function loader() {
 	const publicKey = process.env.VAPID_PUBLIC_KEY;
 	if (!publicKey) {
 		return Response.json(

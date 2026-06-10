@@ -3,9 +3,10 @@ import { getStore } from '@netlify/blobs';
 
 const keyFor = (endpoint) => createHash('sha256').update(endpoint).digest('hex');
 
-// Mark that this subscriber listened today — suppresses today's reminder.
-// Body: { endpoint, localDate: 'YYYY-MM-DD' (in the user's timezone) }
-export async function POST(request) {
+export async function action({ request }) {
+	if (request.method !== 'POST') {
+		return Response.json({ error: 'Method not allowed' }, { status: 405 });
+	}
 	let body;
 	try {
 		body = await request.json();
