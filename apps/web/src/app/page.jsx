@@ -4,6 +4,30 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { motion, AnimatePresence } from "motion/react";
 import { chapters } from "../data/chapters";
 import { useElapsedStore } from "./playbackStore";
+import { Share2, Download, Trash2, MapPin, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  PRAYER_ANCHORS,
+  todayLocalDate,
+  deviceTimezone,
+  reminderTargetToday,
+  formatClock,
+} from "./lib/prayer";
+import {
+  ensurePushSubscription,
+  saveReminderSchedule,
+  removeReminderSchedule,
+  reportListenedToday,
+} from "./lib/push";
+import {
+  TOTAL_VERSES,
+  totalVersesHeard,
+  juzCoverage,
+  projectedFinish,
+  pruneDailyLog,
+} from "./lib/khatmah";
+import { shareVerse } from "./lib/shareCard";
+import { offlineSupported, downloadAudio, removeAudio } from "./lib/offline";
 
 // Bootstrap Icons — inline SVG paths, kept tiny so we don't pull in the full library.
 const BI_PATHS = {
@@ -58,20 +82,7 @@ const RECITERS = [
   { id: 4, name: "Abu Bakr Ash-Shatri" },
   { id: 13, name: "Saad Al-Ghamdi" },
   { id: 161, name: "Khalifah Al-Tunaiji" },
-  // Fares uses quran.com's chapter_recitations endpoint (id 14) — a single MP3
-  // per surah with verse timestamps that match the audio exactly, so verse
-  // highlight works on a continuous chapter timeline with no per-ayah seams.
-  // Word-level segments aren't shipped for him, so word karaoke is unavailable.
-  { id: 14, name: "Fares Abbad" },
-  // Maher uses everyayah per-ayah audio because quran.com's chapter_recitations
-  // for him pair audio from one recording with timestamps from another. The
-  // dual-<audio> path below preloads the next ayah for gapless handoff.
-  {
-    id: 159,
-    name: "Maher al-Muaiqly",
-    source: "everyayah",
-    everyayahFolder: "MaherAlMuaiqly128kbps",
-  },
+  { id: 52, name: "Maher al-Muaiqly" },
 ];
 
 const DURATIONS = [
@@ -80,72 +91,93 @@ const DURATIONS = [
   { label: "15 min", value: 15 * 60 },
 ];
 
-// The 30 ajzāʾ of the Quran as [startSurah, startAyah] → [endSurah, endAyah]
-// (standard Hafs mushaf boundaries). buildJuzSegments turns one of these into
-// an ordered list of per-surah verse ranges so the player can stream a full
-// juz surah by surah.
-const JUZ = [
-  { start: [1, 1], end: [2, 141] },
-  { start: [2, 142], end: [2, 252] },
-  { start: [2, 253], end: [3, 92] },
-  { start: [3, 93], end: [4, 23] },
-  { start: [4, 24], end: [4, 147] },
-  { start: [4, 148], end: [5, 81] },
-  { start: [5, 82], end: [6, 110] },
-  { start: [6, 111], end: [7, 87] },
-  { start: [7, 88], end: [8, 40] },
-  { start: [8, 41], end: [9, 92] },
-  { start: [9, 93], end: [11, 5] },
-  { start: [11, 6], end: [12, 52] },
-  { start: [12, 53], end: [14, 52] },
-  { start: [15, 1], end: [16, 128] },
-  { start: [17, 1], end: [18, 74] },
-  { start: [18, 75], end: [20, 135] },
-  { start: [21, 1], end: [22, 78] },
-  { start: [23, 1], end: [25, 20] },
-  { start: [25, 21], end: [27, 55] },
-  { start: [27, 56], end: [29, 45] },
-  { start: [29, 46], end: [33, 30] },
-  { start: [33, 31], end: [36, 27] },
-  { start: [36, 28], end: [39, 31] },
-  { start: [39, 32], end: [41, 46] },
-  { start: [41, 47], end: [45, 37] },
-  { start: [46, 1], end: [51, 30] },
-  { start: [51, 31], end: [57, 29] },
-  { start: [58, 1], end: [66, 12] },
-  { start: [67, 1], end: [77, 50] },
-  { start: [78, 1], end: [114, 6] },
-];
-
-// Expand a juz (1-based) into ordered { surah, startVerse, endVerse } segments.
-// Middle surahs play in full; only the first and last are partial.
-const buildJuzSegments = (juzNum) => {
-  const j = JUZ[juzNum - 1];
-  if (!j) return [];
-  const [sStart, aStart] = j.start;
-  const [sEnd, aEnd] = j.end;
-  const segs = [];
-  for (let s = sStart; s <= sEnd; s++) {
-    const versesCount = chapters.find((c) => c.id === s)?.verses_count || 1;
-    segs.push({
-      surah: s,
-      startVerse: s === sStart ? aStart : 1,
-      endVerse: s === sEnd ? aEnd : versesCount,
-    });
-  }
-  return segs;
-};
-
-// Curated surah recommendations per mood/intention
+// Emotional first-aid — each feeling maps to a curated pool of FULL surahs
+// that speak to it. Pools are bigger than the old lists, and recently played
+// surahs are remembered across sessions (see moodHistory) so back-to-back
+// days with the same feeling don't serve the same surahs.
+// `promise` is a one-line translated verse shown when the feeling is picked.
 const MOODS = [
-  { id: "fear", label: "Fear of Allah", emoji: "🕊️", surahs: [59, 101, 81, 82, 99] },
-  { id: "patience", label: "Patience", emoji: "⌛", surahs: [12, 103, 94, 2] },
-  { id: "gratitude", label: "Gratitude", emoji: "🌿", surahs: [55, 14, 93, 108] },
-  { id: "afterlife", label: "Afterlife", emoji: "🌅", surahs: [75, 56, 69, 77, 101] },
-  { id: "repentance", label: "Repentance", emoji: "💧", surahs: [66, 25, 110, 71] },
-  { id: "hope", label: "Hope", emoji: "✨", surahs: [39, 36, 93, 94] },
-  { id: "tawakkul", label: "Tawakkul", emoji: "🤲", surahs: [65, 8, 67, 1] },
-  { id: "dunya", label: "Loving this Dunya", emoji: "🌍", surahs: [57, 102, 104, 75] },
+  {
+    id: "anxious",
+    label: "Anxious",
+    emoji: "🌧️",
+    promise:
+      "Those who believe and whose hearts find comfort in the remembrance of Allah. Surely in the remembrance of Allah do hearts find comfort.",
+    ref: "13:28",
+    surahs: [94, 93, 65, 48, 13, 20, 67],
+  },
+  {
+    id: "heavy",
+    label: "Heavy-hearted",
+    emoji: "🌫️",
+    promise:
+      "Your Lord ˹O Prophet˺ has not abandoned you, nor has He become hateful ˹of you˺.",
+    ref: "93:3",
+    surahs: [93, 94, 12, 21, 36, 103],
+  },
+  {
+    id: "grateful",
+    label: "Grateful",
+    emoji: "🌿",
+    promise:
+      "Remember Me; I will remember you. And thank Me, and never be ungrateful.",
+    ref: "2:152",
+    surahs: [55, 14, 16, 93, 108, 106],
+  },
+  {
+    id: "forgiveness",
+    label: "Seeking forgiveness",
+    emoji: "💧",
+    promise:
+      "O My servants who have exceeded the limits against their souls! Do not lose hope in Allah’s mercy, for Allah certainly forgives all sins. He is indeed the All-Forgiving, Most Merciful.",
+    ref: "39:53",
+    surahs: [39, 25, 66, 71, 110, 3],
+  },
+  {
+    id: "lonely",
+    label: "Lonely",
+    emoji: "🕯️",
+    promise:
+      "When My servants ask you ˹O Prophet˺ about Me: I am truly near. I respond to one’s prayer when they call upon Me.",
+    ref: "2:186",
+    surahs: [93, 50, 57, 20, 94],
+  },
+  {
+    id: "hope",
+    label: "Losing hope",
+    emoji: "🌅",
+    promise:
+      "So, surely with hardship comes ease.",
+    ref: "94:5",
+    surahs: [94, 12, 39, 21, 40, 110],
+  },
+  {
+    id: "tawakkul",
+    label: "Worried about the future",
+    emoji: "🤲",
+    promise:
+      "Nothing will ever befall us except what Allah has destined for us. He is our Protector. So in Allah let the believers put their trust.",
+    ref: "9:51",
+    surahs: [65, 11, 29, 67, 106, 51],
+  },
+  {
+    id: "dunya",
+    label: "Attached to dunya",
+    emoji: "🌍",
+    promise:
+      "Whatever you have will end, but whatever Allah has is everlasting. And We will certainly reward the steadfast according to the best of their deeds.",
+    ref: "16:96",
+    surahs: [57, 18, 102, 104, 75, 56],
+  },
+  {
+    id: "awe",
+    label: "Need a wake-up",
+    emoji: "⚡",
+    promise:
+      "But ˹continue to˺ remind. For certainly reminders benefit the believers.",
+    ref: "51:55",
+    surahs: [59, 99, 101, 81, 82, 36],
+  },
 ];
 
 const getGreeting = () => {
@@ -205,21 +237,13 @@ const ElapsedReadout = React.memo(function ElapsedReadout({
   targetDuration,
 }) {
   const elapsed = useElapsedStore((s) => s.elapsed);
-  // Verse readout for surah-without-timer AND juz mode (both follow a verse,
-  // not a clock). The surah is taken from the playing verse so juz shows the
-  // right total as it moves across surahs.
-  const verseReadout =
-    currentAyah && ((mode === "surah" && !surahTimerEnabled) || mode === "juz");
-  const curSurahId = currentAyah
-    ? Number(currentAyah.key.split(":")[0])
-    : selectedSurah;
   return (
     <div className="flex-1 text-right font-mono tracking-tighter text-lg font-bold">
-      {verseReadout ? (
+      {mode === "surah" && !surahTimerEnabled && currentAyah ? (
         <span>
           {currentAyah.key.split(":")[1]}
           <span className="text-warm-400"> / </span>
-          {chapters.find((c) => c.id === curSurahId)?.verses_count || "?"}
+          {chapters.find((c) => c.id === selectedSurah)?.verses_count || "?"}
           <span className="block text-[10px] uppercase tracking-widest text-warm-400 font-bold mt-0.5">
             Verse
           </span>
@@ -244,19 +268,11 @@ const ProgressTrack = React.memo(function ProgressTrack({
   targetDuration,
   surahDataRef,
   audioRef,
-  playPlaylistAyah,
 }) {
   const elapsed = useElapsedStore((s) => s.elapsed);
-  // Verse-positioned bar for surah-without-timer AND juz mode; the surah (and
-  // thus the verse total) is read from the playing verse so it stays correct
-  // as juz mode crosses surah boundaries.
-  const surahMode =
-    currentAyah && ((mode === "surah" && !surahTimerEnabled) || mode === "juz");
-  const curSurahId = currentAyah
-    ? Number(currentAyah.key.split(":")[0])
-    : selectedSurah;
+  const surahMode = mode === "surah" && !surahTimerEnabled && currentAyah;
   const versesCount =
-    chapters.find((c) => c.id === curSurahId)?.verses_count || 1;
+    chapters.find((c) => c.id === selectedSurah)?.verses_count || 1;
   const ratio = surahMode
     ? Number(currentAyah.key.split(":")[1]) / versesCount
     : Math.min(1, elapsed / targetDuration);
@@ -272,10 +288,6 @@ const ProgressTrack = React.memo(function ProgressTrack({
       sd.verses.length - 1,
       Math.floor(r * sd.verses.length),
     );
-    if (sd.isPlaylist) {
-      playPlaylistAyah?.(targetVerseIdx);
-      return;
-    }
     const target = sd.verses[targetVerseIdx];
     if (target) el.currentTime = target.startMs / 1000;
   };
@@ -312,6 +324,126 @@ const ProgressTrack = React.memo(function ProgressTrack({
   );
 });
 
+// Khatmah progress — coverage of the whole Quran, framed as the meaningful
+// goal (finish the Book) rather than an abstract streak. Full card on the
+// finished view; compact strip on setup.
+const monthYear = (date) =>
+  date.toLocaleDateString([], { month: "long", year: "numeric" });
+
+const KhatmahCard = React.memo(function KhatmahCard({
+  heardMap,
+  dailyLog,
+  completions,
+  compact = false,
+}) {
+  const coverage = useMemo(() => juzCoverage(heardMap), [heardMap]);
+  const heard = useMemo(() => totalVersesHeard(heardMap), [heardMap]);
+  const projection = useMemo(
+    () => projectedFinish(heardMap, dailyLog),
+    [heardMap, dailyLog],
+  );
+  const pct = Math.min(100, Math.floor((heard / TOTAL_VERSES) * 1000) / 10);
+  const completeJuz = coverage.filter((j) => j.heard >= j.total).length;
+
+  if (compact) {
+    return (
+      <div className="bg-white border border-warm-200 rounded-2xl px-5 py-4 shadow-card">
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400">
+            Your khatmah{completions > 0 ? ` · #${completions + 1}` : ""}
+          </p>
+          <p className="text-xs font-bold font-mono tabular-nums">
+            {pct}% <span className="text-warm-400 font-normal">of the Quran heard</span>
+          </p>
+        </div>
+        <div className="mt-3 h-1.5 w-full bg-warm-100 rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${Math.max(1, pct)}%`,
+              background:
+                "linear-gradient(90deg, var(--accent-gold) 0%, var(--accent-gold-deep) 100%)",
+            }}
+          />
+        </div>
+        {projection && !projection.complete && (
+          <p className="mt-2 text-[11px] text-warm-400">
+            On pace to finish around{" "}
+            <span className="font-bold text-warm-700">{monthYear(projection.finish)}</span>
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white border border-warm-200 rounded-3xl p-6 shadow-card text-left max-w-md mx-auto">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400">
+            Your khatmah{completions > 0 ? ` · #${completions + 1}` : ""}
+          </p>
+          <p className="text-2xl font-bold font-mono tabular-nums mt-1">
+            {pct}%
+            <span className="text-sm text-warm-400 font-normal font-inter">
+              {" "}
+              · {heard.toLocaleString()} of {TOTAL_VERSES.toLocaleString()} verses
+            </span>
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400">
+            Juz'
+          </p>
+          <p className="text-2xl font-bold font-mono tabular-nums mt-1">
+            {completeJuz}
+            <span className="text-sm text-warm-400 font-normal">/30</span>
+          </p>
+        </div>
+      </div>
+
+      {/* 30-cell juz grid — each cell fills bottom-up with coverage */}
+      <div className="grid grid-cols-10 gap-1.5 mt-5">
+        {coverage.map((j) => (
+          <div
+            key={j.juz}
+            title={`Juz' ${j.juz} — ${j.heard}/${j.total} verses`}
+            className="relative h-7 rounded-md overflow-hidden border border-warm-200 bg-warm-50"
+          >
+            <div
+              className="absolute bottom-0 left-0 right-0"
+              style={{
+                height: `${Math.round(j.ratio * 100)}%`,
+                background:
+                  j.ratio >= 1
+                    ? "linear-gradient(135deg, var(--accent-gold-deep) 0%, var(--accent-gold) 100%)"
+                    : "var(--accent-gold-soft)",
+              }}
+            />
+            <span
+              className={`absolute inset-0 flex items-center justify-center text-[9px] font-mono font-bold ${
+                j.ratio >= 1 ? "text-white" : "text-warm-400"
+              }`}
+            >
+              {j.juz}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-4 text-sm text-warm-500 leading-snug">
+        {projection?.complete
+          ? "Khatmah complete — may Allah accept it. 🎉"
+          : projection
+          ? <>At your pace, you'll finish the Quran around{" "}
+              <span className="font-bold text-warm-900">{monthYear(projection.finish)}</span>
+              , in shaa Allah.</>
+          : "Listen a little each day and your finish date will appear here."}
+      </p>
+    </div>
+  );
+});
+
 export default function QuranProjectPage() {
   const [view, setView] = useState("setup"); // 'setup' | 'playing' | 'finished'
   // Time-of-day greeting depends on the client clock, so it's resolved after
@@ -321,9 +453,6 @@ export default function QuranProjectPage() {
     setGreeting(getGreeting());
   }, []);
   const [reciterId, setReciterId] = usePersistentState("reciterId", 7);
-  useEffect(() => {
-    if (!RECITERS.some((r) => r.id === reciterId)) setReciterId(7);
-  }, [reciterId, setReciterId]);
   const [targetDuration, setTargetDuration] = usePersistentState("targetDuration", 300);
   const [currentAyah, setCurrentAyah] = useState(null);
   // Active word index (1-based) for the karaoke highlight is NOT React state:
@@ -338,11 +467,14 @@ export default function QuranProjectPage() {
   const [loading, setLoading] = useState(false);
   const [customMinutes, setCustomMinutes] = useState("");
   const [error, setError] = useState(null);
-  const [mode, setMode] = usePersistentState("mode", "random"); // 'random' | 'surah' | 'juz'
+  const [mode, setMode] = usePersistentState("mode", "random"); // 'random' | 'surah'
   const [selectedSurah, setSelectedSurah] = usePersistentState("selectedSurah", 1);
-  const [selectedJuz, setSelectedJuz] = usePersistentState("selectedJuz", 1);
-  const [selectedMood, setSelectedMood] = usePersistentState("selectedMood", "fear");
+  const [selectedMood, setSelectedMood] = usePersistentState("selectedMood", "anxious");
   const [moodEnabled, setMoodEnabled] = usePersistentState("moodEnabled", false);
+  // Recently played passages per mood — `{ [moodId]: string[] }` of passage
+  // keys, newest first. Excluded from the next pick so consecutive sessions
+  // with the same feeling don't repeat the same verses.
+  const [moodHistory, setMoodHistory] = usePersistentState("moodHistory", {});
   const [surahTimerEnabled, setSurahTimerEnabled] = usePersistentState("surahTimerEnabled", false);
   const [memorizationEnabled, setMemorizationEnabled] = usePersistentState("memorizationEnabled", false);
   const [memStartVerse, setMemStartVerse] = usePersistentState("memStartVerse", 1);
@@ -378,12 +510,54 @@ export default function QuranProjectPage() {
   // User taps the heart on a verse to add/remove.
   const [savedVerses, setSavedVerses] = usePersistentState("savedVerses", []);
 
-  // Daily reminder — opt-in nudge surfaced inside the app when the user
-  // opens it after their chosen time and hasn't listened yet today.
+  // Daily reminder — anchored to a prayer time (habit-stacking onto salah)
+  // or a fixed clock time. Delivered as a real Web Push from the server's
+  // scheduled function, so it arrives even with the app closed.
   const [reminderEnabled, setReminderEnabled] = usePersistentState("reminderEnabled", false);
   const [reminderTime, setReminderTime] = usePersistentState("reminderTime", "07:00");
+  const [reminderAnchor, setReminderAnchor] = usePersistentState("reminderAnchor", "fajr");
+  const [reminderOffset, setReminderOffset] = usePersistentState("reminderOffset", 15);
+  // { lat, lng } | null — needed to compute prayer times for the reminder.
+  const [reminderLocation, setReminderLocation] = usePersistentState("reminderLocation", null);
+  const [reminderSyncState, setReminderSyncState] = useState("idle"); // 'idle' | 'saving' | 'error'
   const [showReminderBanner, setShowReminderBanner] = useState(false);
   const [showBookmarks, setShowBookmarks] = useState(false);
+
+  // Khatmah — verse-level coverage of the whole Quran. `khatmahVerses` is
+  // `{ [surahId]: number[] }` of unique verses heard; the daily log of NEW
+  // verses heard per day drives the projected finish date.
+  const [khatmahVerses, setKhatmahVerses] = usePersistentState("khatmahVerses", {});
+  const [khatmahDailyLog, setKhatmahDailyLog] = usePersistentState("khatmahDailyLog", {});
+  const [khatmahCompletions, setKhatmahCompletions] = usePersistentState("khatmahCompletions", 0);
+
+  // Offline downloads — `{ "<reciterId>:<surahId>": { surah, reciterId, audioUrl, at } }`.
+  // Audio bytes live in the Cache API; this registry drives the settings UI.
+  const [downloads, setDownloads] = usePersistentState("downloads", {});
+  const [downloadingSurah, setDownloadingSurah] = useState(null);
+  const [offlineSurahPick, setOfflineSurahPick] = useState(1);
+
+  // One-question-at-a-time setup (Typeform-style). The step list depends on
+  // the chosen mode; single-choice answers auto-advance after a beat so the
+  // selection is seen, while steps with inputs use an explicit Continue.
+  const [setupStep, setSetupStep] = useState(0);
+  const advanceTimerRef = useRef(null);
+  const goBackStep = useCallback(() => setSetupStep((s) => Math.max(0, s - 1)), []);
+  const goNextStep = useCallback(() => setSetupStep((s) => s + 1), []);
+  const goNextStepDelayed = useCallback((ms = 350) => {
+    clearTimeout(advanceTimerRef.current);
+    advanceTimerRef.current = setTimeout(() => setSetupStep((s) => s + 1), ms);
+  }, []);
+  useEffect(() => () => clearTimeout(advanceTimerRef.current), []);
+  // Every return to the setup view starts the questions over.
+  useEffect(() => {
+    if (view === "setup") setSetupStep(0);
+  }, [view]);
+  const setupSteps =
+    mode === "surah"
+      ? ["mode", "surah", "reciter"]
+      : ["mode", "duration", "mood", "reciter"];
+  const setupStepIndex = Math.min(setupStep, setupSteps.length - 1);
+  const currentSetupStep = setupSteps[setupStepIndex];
 
   // Single audio element — plays the full surah as one file (no gap problem)
   const audioRef = useRef(null);
@@ -393,27 +567,8 @@ export default function QuranProjectPage() {
   const surahDataRef = useRef(null);
   // Prefetched next surah (for random mode when current finishes before timer ends)
   const nextSurahDataRef = useRef(null);
-  // Index into surahDataRef.current.playlist for per-ayah reciters.
-  // Unused when surahData.isPlaylist is false.
-  const playlistIndexRef = useRef(0);
-  // Juz mode: ordered { surah, startVerse, endVerse } segments for the selected
-  // juz, the index of the segment currently playing, and a guard so the
-  // surah-to-surah handoff can't be triggered twice while the next surah loads.
-  const juzSegmentsRef = useRef([]);
-  const juzIndexRef = useRef(0);
-  const juzAdvancingRef = useRef(false);
-  // advanceJuz is defined below handleTimeUpdate, so the tick reaches it through
-  // this ref (assigned after advanceJuz exists) to avoid a render-time TDZ.
-  const advanceJuzRef = useRef(() => {});
-  // Second audio element used only in playlist mode for gapless verse handoff.
-  // Created imperatively in an effect so we don't add it to the JSX tree —
-  // chapter_recitations reciters never touch it. The ended listener routes
-  // through handleSurahEndedRef so the closure can be updated each render
-  // without re-attaching the event listener.
-  const audioBRef = useRef(null);
-  const activePlaylistAudioRef = useRef("A"); // "A" => audioRef, "B" => audioBRef
-  const handleSurahEndedRef = useRef(() => {});
-  // Surahs already played in the current random session — avoids repeats within a mood pool
+  // Surahs already played in the current random session — avoids repeats
+  // (shared by plain random and mood mode)
   const playedSurahsRef = useRef([]);
 
   // Refs to each verse's language block — used by the auto-focus scroll effect
@@ -455,92 +610,16 @@ export default function QuranProjectPage() {
   // All in one bundled call. Returns { surah, audioUrl, surahName, verses: [{num, text, translation, startMs, endMs}] }
   const fetchSurahData = useCallback(
     async (surahId) => {
-      const reciter = RECITERS.find((r) => r.id === reciterId);
-      const isEveryayah = reciter?.source === "everyayah";
-
-      const versesUrl = `https://api.quran.com/api/v4/verses/by_chapter/${surahId}?fields=text_uthmani&words=true&word_fields=text_uthmani&per_page=300`;
-      const translationsUrl = `https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/eng-mustafakhattaba/${surahId}.json`;
-
-      const surahName =
-        chapters.find((c) => c.id === surahId)?.name_simple || `Surah ${surahId}`;
-
-      const buildTranslationMap = (translationsData) => {
-        const map = {};
-        if (translationsData?.chapter) {
-          translationsData.chapter.forEach((t) => {
-            map[t.verse] = (t.text || "")
-              .replace(/<sup[^>]*>.*?<\/sup>/gi, "")
-              .replace(/<[^>]*>/g, "");
-          });
-        }
-        return map;
-      };
-
-      // Per-ayah audio reciters via everyayah.com. Each verse is its own MP3 —
-      // the player advances through the playlist with a dual-<audio> handoff,
-      // preloading the next ayah while the current is playing so transitions
-      // are gapless. Verse-level tracking is exact (it's whichever ayah's MP3
-      // is playing). Word-by-word karaoke is unavailable since everyayah
-      // doesn't ship word timings.
-      if (isEveryayah) {
-        const [versesRes, translationsRes] = await Promise.all([
-          fetch(versesUrl),
-          fetch(translationsUrl),
-        ]);
-        if (!versesRes.ok) throw new Error(`Verse API error: ${versesRes.status}`);
-        const [versesData, translationsData] = await Promise.all([
-          versesRes.json(),
-          translationsRes.ok ? translationsRes.json() : null,
-        ]);
-        const translationByVerse = buildTranslationMap(translationsData);
-
-        const verses = versesData.verses.map((v) => {
-          const words = (v.words || [])
-            .filter((w) => w.char_type_name === "word")
-            .map((w) => ({
-              position: w.position,
-              text: w.text_uthmani || w.text || "",
-              translation: w.translation?.text || "",
-              transliteration: w.transliteration?.text || "",
-            }));
-          return {
-            num: v.verse_number,
-            key: v.verse_key,
-            text: v.text_uthmani,
-            translation:
-              translationByVerse[v.verse_number] || "Translation not available",
-            // startMs/endMs and segments are intentionally empty for playlist
-            // reciters — verse tracking uses the playlist index, not audio time.
-            startMs: 0,
-            endMs: 0,
-            segments: [],
-            words,
-          };
-        });
-
-        const sss = String(surahId).padStart(3, "0");
-        const folder = reciter.everyayahFolder;
-        const playlist = verses.map((v) => ({
-          num: v.num,
-          url: `https://everyayah.com/data/${folder}/${sss}${String(v.num).padStart(3, "0")}.mp3`,
-        }));
-
-        return {
-          surah: surahId,
-          surahName,
-          audioUrl: playlist[0]?.url || "",
-          verses,
-          isPlaylist: true,
-          playlist,
-        };
-      }
-
       const [chapterAudioRes, versesRes, translationsRes] = await Promise.all([
         fetch(
           `https://api.quran.com/api/v4/chapter_recitations/${reciterId}/${surahId}?segments=true`,
         ),
-        fetch(versesUrl),
-        fetch(translationsUrl),
+        fetch(
+          `https://api.quran.com/api/v4/verses/by_chapter/${surahId}?fields=text_uthmani&words=true&word_fields=text_uthmani&per_page=300`,
+        ),
+        fetch(
+          `https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/eng-mustafakhattaba/${surahId}.json`,
+        ),
       ]);
 
       if (!chapterAudioRes.ok) throw new Error(`Audio API error: ${chapterAudioRes.status}`);
@@ -555,7 +634,14 @@ export default function QuranProjectPage() {
       if (!chapterAudio.audio_file) throw new Error("Chapter audio not found");
 
       const timestamps = chapterAudio.audio_file.timestamps || [];
-      const translationByVerse = buildTranslationMap(translationsData);
+      const translationByVerse = {};
+      if (translationsData?.chapter) {
+        translationsData.chapter.forEach((t) => {
+          translationByVerse[t.verse] = (t.text || "")
+            .replace(/<sup[^>]*>.*?<\/sup>/gi, "")
+            .replace(/<[^>]*>/g, "");
+        });
+      }
 
       const verses = versesData.verses.map((v) => {
         const ts = timestamps.find((t) => t.verse_key === v.verse_key);
@@ -597,7 +683,8 @@ export default function QuranProjectPage() {
       return {
         surah: surahId,
         audioUrl: chapterAudio.audio_file.audio_url,
-        surahName,
+        surahName:
+          chapters.find((c) => c.id === surahId)?.name_simple || `Surah ${surahId}`,
         verses,
       };
     },
@@ -613,14 +700,10 @@ export default function QuranProjectPage() {
     const sd = surahDataRef.current;
     if (!el || !sd) return;
     const currentMs = el.currentTime * 1000;
-    // Find the verse whose time range contains currentMs. When nothing
-    // matches, clamp: before verse 1 (Bismillah pre-roll on surahs 2+) stays
-    // on verse 1, past the last verse stays on the last verse.
-    const first = sd.verses[0];
-    const last = sd.verses[sd.verses.length - 1];
+    // Find the verse whose time range contains currentMs
     const active =
       sd.verses.find((v) => currentMs >= v.startMs && currentMs < v.endMs) ||
-      (currentMs < first.startMs ? first : last);
+      sd.verses[sd.verses.length - 1]; // fallback to last verse at end
     if (!active) return;
     // Update state only if it changed
     setCurrentAyah((prev) => {
@@ -652,31 +735,10 @@ export default function QuranProjectPage() {
     rafPendingRef.current = true;
     requestAnimationFrame(() => {
       rafPendingRef.current = false;
-
-      // Playlist (per-ayah) reciters drive verse tracking and end conditions
-      // from handleSurahEnded. Time-based lookups don't apply since every
-      // verse here is a separate MP3 with its own currentTime starting at 0.
-      if (surahDataRef.current?.isPlaylist) return;
-
       updateCurrentVerse();
 
-      // Juz mode — when the current surah reaches this segment's end verse,
-      // hand off to the next surah of the juz (or finish on the last one).
-      if (mode === "juz") {
-        const el = audioRef.current;
-        const sd = surahDataRef.current;
-        const seg = juzSegmentsRef.current[juzIndexRef.current];
-        if (!el || !sd || !seg) return;
-        const endV = sd.verses.find((v) => v.num === seg.endVerse);
-        if (!endV) return;
-        const currentMs = el.currentTime * 1000;
-        if (currentMs >= endV.endMs - 60) {
-          advanceJuzRef.current();
-        }
-        return;
-      }
-
       // Memorization mode — loop or stop at end of selected verse range.
+      // Takes priority over the duration timer.
       if (mode === "surah" && memorizationEnabled) {
         const el = audioRef.current;
         const sd = surahDataRef.current;
@@ -685,25 +747,6 @@ export default function QuranProjectPage() {
         const endV = sd.verses.find((v) => v.num === Number(memEndVerse));
         if (!startV || !endV) return;
         const currentMs = el.currentTime * 1000;
-
-        // Session timer takes priority and is checked on every tick (not just
-        // at the loop boundary) — otherwise a long passage or repeat-off range
-        // would run well past the chosen duration. Stop at the next verse
-        // boundary so we don't cut mid-word; if we can't place the current
-        // verse, stop immediately.
-        const timerExpired =
-          autoStopTimer && surahTimerEnabled && (Date.now() - startTime) / 1000 >= targetDuration;
-        if (timerExpired) {
-          const active = sd.verses.find((v) => currentMs >= v.startMs && currentMs < v.endMs);
-          if (!active || active.endMs - currentMs <= 200) {
-            el.pause();
-            setView("finished");
-            setIsPlaying(false);
-          }
-          return;
-        }
-
-        // No timer (or not yet expired): handle the memorization loop boundary.
         if (currentMs >= endV.endMs - 60) {
           if (memRepeat) {
             el.currentTime = startV.startMs / 1000;
@@ -713,7 +756,7 @@ export default function QuranProjectPage() {
             setIsPlaying(false);
           }
         }
-        return; // memorization owns its end conditions; skip the timer block below.
+        return; // skip duration-timer logic when memorizing
       }
 
       // Timer-based end condition (random mode OR surah mode with optional timer enabled)
@@ -754,17 +797,10 @@ export default function QuranProjectPage() {
     memRepeat,
   ]);
 
-  // Pick the next random surah, respecting the active mood pool and avoiding
-  // repeats within the current session. Reshuffles automatically once the pool
-  // is exhausted.
+  // Pick the next random surah (no mood), avoiding repeats within the current
+  // session. Reshuffles automatically once all 114 have been cycled.
   const pickNextRandomSurah = useCallback(() => {
-    let pool;
-    if (moodEnabled) {
-      const mood = MOODS.find((m) => m.id === selectedMood);
-      pool = mood?.surahs && mood.surahs.length > 0 ? mood.surahs : [1];
-    } else {
-      pool = Array.from({ length: 114 }, (_, i) => i + 1);
-    }
+    const pool = Array.from({ length: 114 }, (_, i) => i + 1);
     const unplayed = pool.filter((id) => !playedSurahsRef.current.includes(id));
     const source = unplayed.length > 0 ? unplayed : pool;
     if (unplayed.length === 0) {
@@ -774,134 +810,43 @@ export default function QuranProjectPage() {
     const picked = source[Math.floor(Math.random() * source.length)];
     playedSurahsRef.current = [...playedSurahsRef.current, picked];
     return picked;
-  }, [moodEnabled, selectedMood]);
-
-  // Initialize the secondary audio element once on mount. It lives outside
-  // the JSX tree so non-playlist reciters never touch it. The `ended`
-  // listener routes through handleSurahEndedRef so the closure can be updated
-  // each render without re-attaching the listener.
-  useEffect(() => {
-    if (audioBRef.current || typeof window === "undefined") return;
-    const el = new window.Audio();
-    el.preload = "auto";
-    el.addEventListener("ended", () => {
-      handleSurahEndedRef.current?.();
-    });
-    audioBRef.current = el;
   }, []);
 
-  // Helper: which audio element is currently the live one in playlist mode.
-  const getActivePlaylistEl = () =>
-    activePlaylistAudioRef.current === "A" ? audioRef.current : audioBRef.current;
-  const getStandbyPlaylistEl = () =>
-    activePlaylistAudioRef.current === "A" ? audioBRef.current : audioRef.current;
-
-  // Switch the audio elements to a specific ayah of a per-ayah (playlist)
-  // surah. Used for initial play, memorization start, resume-from-bookmark,
-  // and scrubbing — i.e., any non-sequential jump. Pins active to "A" for a
-  // deterministic state, plays the target ayah on A, and starts preloading
-  // the next ayah on B so the following transition is gapless.
-  const playPlaylistAyah = useCallback((idx) => {
-    const sd = surahDataRef.current;
-    if (!sd?.isPlaylist) return null;
-    const clamped = Math.max(0, Math.min(sd.playlist.length - 1, idx));
-    playlistIndexRef.current = clamped;
-    activePlaylistAudioRef.current = "A";
-
-    const verse = sd.verses[clamped];
-    const entry = sd.playlist[clamped];
-    if (!entry || !verse) return null;
-    setCurrentAyah({
-      key: verse.key,
-      text: verse.text,
-      translation: verse.translation,
-      surahName: sd.surahName,
-      segments: [],
-      words: verse.words || [],
-    });
-
-    const a = audioRef.current;
-    const b = audioBRef.current;
-    if (b) {
-      b.pause();
+  // Pick the next full surah for the active mood. Avoids repeats within the
+  // session AND surahs played in recent sessions (moodHistory remembers the
+  // newest half of the pool), so the same feeling doesn't serve the same
+  // surahs two days in a row.
+  const pickNextMoodSurah = useCallback(() => {
+    const mood = MOODS.find((m) => m.id === selectedMood) || MOODS[0];
+    const pool = mood.surahs;
+    const recent = moodHistory[mood.id] || [];
+    const inSession = (id) => playedSurahsRef.current.includes(id);
+    let candidates = pool.filter((id) => !inSession(id) && !recent.includes(id));
+    if (candidates.length === 0) candidates = pool.filter((id) => !inSession(id));
+    if (candidates.length === 0) {
+      playedSurahsRef.current = [];
+      candidates = pool;
     }
-    if (a) {
-      a.src = entry.url;
-      a.load();
-      a.play().catch((e) => console.error("Playback error:", e));
-    }
+    const picked = candidates[Math.floor(Math.random() * candidates.length)];
+    playedSurahsRef.current = [...playedSurahsRef.current, picked];
+    const keep = Math.max(1, Math.floor(pool.length / 2));
+    setMoodHistory((prev) => ({
+      ...prev,
+      [mood.id]: [picked, ...(prev[mood.id] || []).filter((k) => k !== picked)].slice(0, keep),
+    }));
+    return picked;
+  }, [selectedMood, moodHistory, setMoodHistory]);
 
-    const nextEntry = sd.playlist[clamped + 1];
-    if (b && nextEntry) {
-      // Setting src on a preload="auto" element triggers fetch + decode in
-      // the background. By the time A's ayah ends, B is buffered and ready.
-      // Explicit load() kicks the fetch reliably on iOS Safari.
-      b.src = nextEntry.url;
-      b.load();
-    } else if (b) {
-      b.removeAttribute("src");
-    }
-    return verse;
-  }, []);
-
-  // Gapless handoff. Called when the currently-playing playlist element ends
-  // and we want to move to the next ayah without setting/loading the active
-  // element's src (which would introduce a fetch/decode gap). The standby
-  // element already has the next ayah buffered, so play() on it is near-
-  // instant; the now-standby element is queued with the ayah AFTER for the
-  // following handoff.
-  const advancePlaylist = useCallback(() => {
-    const sd = surahDataRef.current;
-    if (!sd?.isPlaylist) return false;
-    const nextIdx = playlistIndexRef.current + 1;
-    const nextEntry = sd.playlist[nextIdx];
-    const verse = sd.verses[nextIdx];
-    if (!nextEntry || !verse) return false;
-
-    playlistIndexRef.current = nextIdx;
-    setCurrentAyah({
-      key: verse.key,
-      text: verse.text,
-      translation: verse.translation,
-      surahName: sd.surahName,
-      segments: [],
-      words: verse.words || [],
-    });
-
-    activePlaylistAudioRef.current =
-      activePlaylistAudioRef.current === "A" ? "B" : "A";
-    const active = getActivePlaylistEl();
-    if (active) {
-      // currentTime may have advanced past 0 if a previous preload run got
-      // far enough; reset to be safe.
-      try { active.currentTime = 0; } catch {}
-      active.play().catch((e) => console.error("Playback error:", e));
-    }
-
-    const preloadEntry = sd.playlist[nextIdx + 1];
-    const standby = getStandbyPlaylistEl();
-    if (standby) {
-      standby.pause();
-      if (preloadEntry) {
-        standby.src = preloadEntry.url;
-        standby.load();
-      } else {
-        standby.removeAttribute("src");
-      }
-    }
-    return true;
-  }, []);
-
-  // Prefetch next surah (for random mode when current surah ends before timer)
+  // Prefetch next surah (for random mode when current ends before timer)
   const prefetchRandomSurah = useCallback(async () => {
     try {
-      const nextId = pickNextRandomSurah();
+      const nextId = moodEnabled ? pickNextMoodSurah() : pickNextRandomSurah();
       const data = await fetchSurahData(nextId);
       nextSurahDataRef.current = data;
     } catch (err) {
       nextSurahDataRef.current = null;
     }
-  }, [fetchSurahData, pickNextRandomSurah]);
+  }, [fetchSurahData, pickNextRandomSurah, pickNextMoodSurah, moodEnabled]);
 
   const loadAndPlaySurah = useCallback(
     async (surahId, preloaded) => {
@@ -910,32 +855,13 @@ export default function QuranProjectPage() {
       try {
         const data = preloaded || (await fetchSurahData(surahId));
         surahDataRef.current = data;
-        playlistIndexRef.current = 0;
 
-        // Pick the verse to start on. Memorization starts at the user's start
-        // verse; juz mode starts at the current segment's start verse (verse 1
-        // for every surah except the first one of the juz). Everything else
-        // starts at verse 1.
-        const juzSeg = mode === "juz" ? juzSegmentsRef.current[juzIndexRef.current] : null;
+        // For memorization, the listener wants to start at a specific verse —
+        // pick that one instead of verse 1 for the immediate display.
         const initialVerse =
           mode === "surah" && memorizationEnabled
             ? data.verses.find((v) => v.num === Number(memStartVerse)) || data.verses[0]
-            : juzSeg
-            ? data.verses.find((v) => v.num === juzSeg.startVerse) || data.verses[0]
             : data.verses[0];
-
-        // Playlist reciters: pick the ayah index for the initial verse and
-        // hand off to playPlaylistAyah, which sets src + display + plays.
-        if (data.isPlaylist) {
-          const idx = Math.max(
-            0,
-            data.playlist.findIndex((p) => p.num === initialVerse?.num),
-          );
-          playPlaylistAyah(idx);
-          setLoading(false);
-          if (mode === "random") prefetchRandomSurah();
-          return;
-        }
 
         if (initialVerse) {
           setCurrentAyah({
@@ -953,10 +879,7 @@ export default function QuranProjectPage() {
           el.src = data.audioUrl;
           el.load();
           const seekIfNeeded = () => {
-            if (
-              initialVerse &&
-              ((mode === "surah" && memorizationEnabled) || mode === "juz")
-            ) {
+            if (mode === "surah" && memorizationEnabled && initialVerse) {
               el.currentTime = initialVerse.startMs / 1000;
             }
           };
@@ -984,131 +907,15 @@ export default function QuranProjectPage() {
         setLoading(false);
       }
     },
-    [
-      fetchSurahData,
-      mode,
-      prefetchRandomSurah,
-      memorizationEnabled,
-      memStartVerse,
-      playPlaylistAyah,
-    ],
+    [fetchSurahData, mode, prefetchRandomSurah, memorizationEnabled, memStartVerse],
   );
-
-  // Juz mode: move to the next surah segment of the current juz, or finish if
-  // the last segment just ended. The guard prevents the time-update tick and
-  // the audio `ended` event from both firing this during the async surah load.
-  const advanceJuz = useCallback(async () => {
-    if (juzAdvancingRef.current) return;
-    juzAdvancingRef.current = true;
-    try {
-      const next = juzIndexRef.current + 1;
-      const segs = juzSegmentsRef.current;
-      if (next >= segs.length) {
-        audioRef.current?.pause();
-        audioBRef.current?.pause();
-        setView("finished");
-        setIsPlaying(false);
-        return;
-      }
-      juzIndexRef.current = next;
-      await loadAndPlaySurah(segs[next].surah);
-    } finally {
-      juzAdvancingRef.current = false;
-    }
-  }, [loadAndPlaySurah]);
-  advanceJuzRef.current = advanceJuz;
 
   // When the full surah audio naturally ends (via onEnded)
   const handleSurahEnded = useCallback(() => {
-    const sd = surahDataRef.current;
-
-    // Playlist (per-ayah) reciters: each `ended` is the end of one ayah, not
-    // the whole surah. Advance through the playlist; only fall through to the
-    // chapter-end logic below when the last ayah finishes (or memorization /
-    // session-timer asks us to stop early).
-    if (sd?.isPlaylist) {
-      const idx = playlistIndexRef.current;
-      const last = sd.playlist.length - 1;
-      const memStart = Number(memStartVerse);
-      const memEnd = Number(memEndVerse);
-      const currentNum = sd.playlist[idx]?.num;
-
-      // Juz mode (playlist reciter): advance to the next surah of the juz once
-      // this segment's end verse has played; otherwise continue to the next
-      // ayah within the surah via the gapless handoff.
-      if (mode === "juz") {
-        const seg = juzSegmentsRef.current[juzIndexRef.current];
-        if (seg && currentNum >= seg.endVerse) {
-          advanceJuz();
-        } else if (idx < last) {
-          advancePlaylist();
-        } else {
-          advanceJuz();
-        }
-        return;
-      }
-
-      if (mode === "surah" && memorizationEnabled && memStart > 0 && memEnd > 0) {
-        const timerExpired =
-          autoStopTimer && surahTimerEnabled && (Date.now() - startTime) / 1000 >= targetDuration;
-        if (currentNum >= memEnd) {
-          // Stop if timer expired or repeat is off, otherwise loop back to startV.
-          if (timerExpired || !memRepeat) {
-            setView("finished");
-            setIsPlaying(false);
-            return;
-          }
-          const startIdx = sd.playlist.findIndex((p) => p.num === memStart);
-          // Loop point isn't preloaded (we only preload N+1), so this jump
-          // can have a small gap — acceptable for the repeat boundary.
-          playPlaylistAyah(startIdx >= 0 ? startIdx : 0);
-          return;
-        }
-        if (timerExpired) {
-          // Mid-loop, timer ran out — stop at the next ayah boundary.
-          setView("finished");
-          setIsPlaying(false);
-          return;
-        }
-        // Sequential advance — gapless via the preloaded standby element.
-        advancePlaylist();
-        return;
-      }
-
-      // Session timer: stop at the end of the current ayah once the clock has
-      // run out, instead of cutting in mid-verse like the chapter-audio path
-      // does (which can read currentTime mid-stream).
-      const timerActive =
-        autoStopTimer && (mode === "random" || (mode === "surah" && surahTimerEnabled));
-      if (timerActive) {
-        const elapsed = (Date.now() - startTime) / 1000;
-        if (elapsed >= targetDuration) {
-          setView("finished");
-          setIsPlaying(false);
-          return;
-        }
-      }
-
-      if (idx < last) {
-        // Gapless handoff to the preloaded standby element.
-        advancePlaylist();
-        return;
-      }
-      // Last ayah finished — fall through to the chapter-end logic below.
-    }
-
-    // Juz mode (single-audio reciter): the file ended on this segment's last
-    // verse — move to the next surah of the juz (advanceJuz finishes the
-    // session if this was the final segment). The time-update tick usually
-    // triggers this a hair earlier; the guard in advanceJuz dedupes.
-    if (mode === "juz") {
-      advanceJuz();
-      return;
-    }
-
     if (mode === "surah") {
       // Memorization with repeat — loop back to the start verse instead of finishing
       if (memorizationEnabled && memRepeat) {
+        const sd = surahDataRef.current;
         const el = audioRef.current;
         const startV = sd?.verses.find((v) => v.num === Number(memStartVerse));
         if (sd && el && startV) {
@@ -1122,7 +929,7 @@ export default function QuranProjectPage() {
       setIsPlaying(false);
       return;
     }
-    // Random mode: if timer done, finish; else play another surah
+    // Random mode: if timer done, finish; else play another surah/passage
     const elapsed = (Date.now() - startTime) / 1000;
     if (elapsed >= targetDuration) {
       setView("finished");
@@ -1135,7 +942,7 @@ export default function QuranProjectPage() {
     if (preloaded) {
       loadAndPlaySurah(preloaded.surah, preloaded);
     } else {
-      const nextId = pickNextRandomSurah();
+      const nextId = moodEnabled ? pickNextMoodSurah() : pickNextRandomSurah();
       loadAndPlaySurah(nextId);
     }
   }, [
@@ -1144,44 +951,24 @@ export default function QuranProjectPage() {
     targetDuration,
     loadAndPlaySurah,
     pickNextRandomSurah,
+    pickNextMoodSurah,
+    moodEnabled,
     memorizationEnabled,
     memRepeat,
     memStartVerse,
-    memEndVerse,
-    surahTimerEnabled,
-    autoStopTimer,
-    playPlaylistAyah,
-    advancePlaylist,
-    advanceJuz,
   ]);
 
-  // Mirror handleSurahEnded into a ref so the secondary audio element's
-  // imperative listener (attached once in the init effect) always invokes
-  // the latest closure with current state/deps.
-  handleSurahEndedRef.current = handleSurahEnded;
-
   const startPlayback = useCallback(() => {
-    // Reset session state — critical for random mode so mood pool picks fresh
+    // Reset session state — critical for random mode so pools pick fresh
     surahDataRef.current = null;
     nextSurahDataRef.current = null;
     playedSurahsRef.current = [];
-    activePlaylistAudioRef.current = "A";
-    playlistIndexRef.current = 0;
-    const b = audioBRef.current;
-    if (b) {
-      b.pause();
-      b.removeAttribute("src");
-    }
-    juzAdvancingRef.current = false;
 
     let startSurah;
     if (mode === "surah") {
       startSurah = selectedSurah;
-    } else if (mode === "juz") {
-      const segs = buildJuzSegments(selectedJuz);
-      juzSegmentsRef.current = segs;
-      juzIndexRef.current = 0;
-      startSurah = segs[0]?.surah || 1;
+    } else if (moodEnabled) {
+      startSurah = pickNextMoodSurah();
     } else {
       startSurah = pickNextRandomSurah();
     }
@@ -1191,23 +978,17 @@ export default function QuranProjectPage() {
     setView("playing");
     setIsPlaying(true);
     loadAndPlaySurah(startSurah);
-  }, [mode, selectedSurah, selectedJuz, pickNextRandomSurah, loadAndPlaySurah]);
+  }, [mode, selectedSurah, moodEnabled, pickNextRandomSurah, pickNextMoodSurah, loadAndPlaySurah]);
 
-  // Pause/resume: toggle the audio element directly. In playlist mode we
-  // operate on whichever element (A or B) is the current live one — the
-  // standby stays paused/preloading regardless.
+  // Pause/resume: toggle the audio element directly
   useEffect(() => {
-    const sd = surahDataRef.current;
-    const el = sd?.isPlaylist
-      ? activePlaylistAudioRef.current === "A"
-        ? audioRef.current
-        : audioBRef.current
-      : audioRef.current;
-    if (!el) return;
-    if (isPlaying) {
-      el.play().catch((e) => console.error("Playback error:", e));
-    } else {
-      el.pause();
+    const el = audioRef.current;
+    if (el) {
+      if (isPlaying) {
+        el.play().catch((e) => console.error("Playback error:", e));
+      } else {
+        el.pause();
+      }
     }
   }, [isPlaying]);
 
@@ -1268,13 +1049,6 @@ export default function QuranProjectPage() {
       el.removeAttribute("src");
       el.load();
     }
-    const b = audioBRef.current;
-    if (b) {
-      b.pause();
-      b.removeAttribute("src");
-    }
-    activePlaylistAudioRef.current = "A";
-    playlistIndexRef.current = 0;
     surahDataRef.current = null;
     nextSurahDataRef.current = null;
     setCurrentAyah(null);
@@ -1295,13 +1069,6 @@ export default function QuranProjectPage() {
     surahDataRef.current = null;
     nextSurahDataRef.current = null;
     playedSurahsRef.current = [];
-    activePlaylistAudioRef.current = "A";
-    playlistIndexRef.current = 0;
-    const b = audioBRef.current;
-    if (b) {
-      b.pause();
-      b.removeAttribute("src");
-    }
     useElapsedStore.getState().reset();
     setStartTime(Date.now());
     setView("playing");
@@ -1312,19 +1079,7 @@ export default function QuranProjectPage() {
     try {
       const data = await fetchSurahData(lastSession.surah);
       surahDataRef.current = data;
-      playlistIndexRef.current = 0;
       const verseNum = Number(lastSession.verseKey.split(":")[1]);
-
-      if (data.isPlaylist) {
-        const idx = Math.max(
-          0,
-          data.playlist.findIndex((p) => p.num === verseNum),
-        );
-        playPlaylistAyah(idx);
-        setLoading(false);
-        return;
-      }
-
       const startV = data.verses.find((v) => v.num === verseNum) || data.verses[0];
       setCurrentAyah({
         key: startV.key,
@@ -1351,7 +1106,7 @@ export default function QuranProjectPage() {
       setError(err.message);
       setLoading(false);
     }
-  }, [lastSession, fetchSurahData, setMode, setSelectedSurah, playPlaylistAyah]);
+  }, [lastSession, fetchSurahData, setMode, setSelectedSurah]);
 
   const handleDismissResume = useCallback(() => {
     setShowResumePrompt(false);
@@ -1448,25 +1203,14 @@ export default function QuranProjectPage() {
     setHoveredWordPos(null);
   }, [currentAyah?.key]);
 
-  // On mount, surface a one-tap "Resume" prompt if there's a recent session
-  // bookmark. We read localStorage directly rather than the `lastSession`
-  // state: usePersistentState seeds from the default (null) and only loads the
-  // stored value in a post-mount effect, so a []-deps effect reading the state
-  // would always see null and the prompt would never appear. Window is 7 days
-  // so a "yesterday" listen (commonly 25+ hours out) still qualifies.
+  // On mount, check if there's a recent (<24h) session bookmark — if so,
+  // surface a one-tap "Resume" prompt. Hidden until the user has actually
+  // listened past verse 1 (so refreshing the setup view doesn't trigger it).
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_PREFIX + "lastSession");
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      const RESUME_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-      if (saved?.savedAt && Date.now() - saved.savedAt < RESUME_WINDOW_MS) {
-        setShowResumePrompt(true);
-      }
-    } catch {
-      // Ignore corrupt / privacy-mode reads
+    if (lastSession && lastSession.savedAt && Date.now() - lastSession.savedAt < 24 * 60 * 60 * 1000) {
+      setShowResumePrompt(true);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Daily streak — increments on first verse play of a new local day.
   // Continues from yesterday → today; resets to 1 on a missed day.
@@ -1483,6 +1227,8 @@ export default function QuranProjectPage() {
       count: continued ? streak.count + 1 : 1,
       lastDate: todayStr,
     });
+    // Tell the reminder server we listened — suppresses today's push.
+    reportListenedToday(todayLocalDate());
   }, [currentAyah?.key, view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Per-surah listening history — increments count + bumps lastPlayed when
@@ -1503,6 +1249,33 @@ export default function QuranProjectPage() {
     }));
   }, [currentAyah?.key, view]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Khatmah coverage — record each unique verse heard, and log new verses
+  // per day so the projected finish date reflects real pace.
+  useEffect(() => {
+    if (view !== "playing" || !currentAyah || !surahDataRef.current) return;
+    const sid = String(surahDataRef.current.surah);
+    const vnum = Number(currentAyah.key.split(":")[1]);
+    if (!Number.isFinite(vnum)) return;
+    if ((khatmahVerses[sid] || []).includes(vnum)) return;
+    setKhatmahVerses((prev) => {
+      const arr = prev[sid] || [];
+      if (arr.includes(vnum)) return prev;
+      return { ...prev, [sid]: [...arr, vnum] };
+    });
+    const today = todayLocalDate();
+    setKhatmahDailyLog((prev) =>
+      pruneDailyLog({ ...prev, [today]: (prev[today] || 0) + 1 }),
+    );
+  }, [currentAyah?.key, view]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Khatmah complete — celebrate, count it, and start the next one.
+  useEffect(() => {
+    if (totalVersesHeard(khatmahVerses) < TOTAL_VERSES) return;
+    setKhatmahCompletions((c) => c + 1);
+    setKhatmahVerses({});
+    toast.success("Khatmah complete — may Allah accept it! 🎉 Your next one starts now.");
+  }, [khatmahVerses]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Register service worker for push notifications.
   useEffect(() => {
     if ('serviceWorker' in navigator) {
@@ -1510,116 +1283,109 @@ export default function QuranProjectPage() {
     }
   }, []);
 
-  // Does this browser support scheduling notifications that fire while the app
-  // is closed? (Notification Triggers API — Chromium/Android installed PWAs.)
-  const supportsNotificationTriggers = () =>
-    typeof window !== "undefined" &&
-    typeof Notification !== "undefined" &&
-    "showTrigger" in Notification.prototype &&
-    "TimestampTrigger" in window;
-
-  // Schedule the daily reminder as real OS-level notifications that fire even
-  // when the PWA is fully closed, via the service worker + Notification
-  // Triggers API. A purely in-app setInterval (below) can't fire when closed —
-  // which is the whole point of a daily reminder — so this is the primary path
-  // on browsers that support it. We schedule the next two weeks of occurrences
-  // (triggers are one-shot) and top this up every time the app is opened.
-  const scheduleTriggeredReminders = useCallback(
-    async (enabledOverride) => {
-    if (!("serviceWorker" in navigator)) return false;
-    if (typeof Notification === "undefined" || Notification.permission !== "granted")
-      return false;
-    if (!supportsNotificationTriggers()) return false;
-    const enabled = enabledOverride ?? reminderEnabled;
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      // Clear any reminders we previously scheduled before re-scheduling.
-      const pending = await reg.getNotifications({ includeTriggered: true });
-      pending
-        .filter((n) => (n.tag || "").startsWith("daily-reminder-"))
-        .forEach((n) => n.close());
-
-      if (!enabled || !reminderTime) return true;
-
-      const [h, m] = reminderTime.split(":").map(Number);
-      const now = Date.now();
-      for (let i = 0; i < 14; i++) {
-        const t = new Date();
-        t.setDate(t.getDate() + i);
-        t.setHours(h, m, 0, 0);
-        const ts = t.getTime();
-        if (ts <= now) continue; // skip today if the time already passed
-        await reg.showNotification("Time for your daily Quran 🤲", {
-          body: "Take a few minutes to listen.",
-          icon: "/android-chrome-192x192.png",
-          badge: "/android-chrome-192x192.png",
-          tag: `daily-reminder-${t.toISOString().slice(0, 10)}`,
-          showTrigger: new window.TimestampTrigger(ts),
-        });
-      }
-      return true;
-    } catch {
-      return false;
-    }
-    },
-    [reminderEnabled, reminderTime],
-  );
-
-  // (Re)schedule the closed-app reminders whenever the setting changes or the
-  // app is opened (to extend the rolling two-week window).
+  // In-app reminder banner — OS notifications now come from the server's
+  // scheduled push (works with the app closed); this only surfaces the
+  // banner when the app happens to be open past the reminder time.
   useEffect(() => {
-    scheduleTriggeredReminders();
-  }, [scheduleTriggeredReminders]);
+    if (!reminderEnabled) return;
 
-  // In-app fallback — fires a real OS notification (and in-app banner) when the
-  // user hasn't listened yet and their chosen time has arrived. Only runs while
-  // the app is open; on browsers that support Notification Triggers the OS
-  // notification is already scheduled above, so here we only raise the in-app
-  // banner and skip the (duplicate) manual notification.
-  useEffect(() => {
-    if (!reminderEnabled || !reminderTime) return;
-
-    const check = async () => {
+    const check = () => {
       const now = new Date();
       const todayStr = now.toISOString().slice(0, 10);
       if (streak.lastDate === todayStr) return; // already listened today
-      if (shownTodayRef.current === todayStr) return; // already notified today
-
-      const [h, m] = reminderTime.split(":").map(Number);
-      const target = new Date(now);
-      target.setHours(h, m, 0, 0);
-      if (now < target) return; // not yet time
-
+      if (shownTodayRef.current === todayStr) return; // already shown today
+      const target = reminderTargetToday({
+        anchor: reminderAnchor,
+        offsetMin: reminderOffset,
+        clockTime: reminderTime,
+        lat: reminderLocation?.lat,
+        lng: reminderLocation?.lng,
+      });
+      if (!target || now < target) return;
       shownTodayRef.current = todayStr;
       setShowReminderBanner(true);
-
-      // The OS notification is handled by the scheduled trigger when supported —
-      // avoid firing a duplicate here.
-      if (supportsNotificationTriggers()) return;
-
-      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-        try {
-          const reg = await navigator.serviceWorker.ready;
-          reg.showNotification("Time for your daily Quran 🤲", {
-            body: "You haven't listened today yet. Take a few minutes.",
-            icon: "/android-chrome-192x192.png",
-            badge: "/android-chrome-192x192.png",
-            tag: "daily-reminder",
-            renotify: false,
-          });
-        } catch {
-          new Notification("Time for your daily Quran 🤲", {
-            body: "You haven't listened today yet.",
-            icon: "/android-chrome-192x192.png",
-          });
-        }
-      }
     };
 
     check();
     const id = setInterval(check, 60_000);
     return () => clearInterval(id);
-  }, [reminderEnabled, reminderTime, streak.lastDate]);
+  }, [
+    reminderEnabled,
+    reminderAnchor,
+    reminderOffset,
+    reminderTime,
+    reminderLocation,
+    streak.lastDate,
+  ]);
+
+  // Sync the reminder schedule (push subscription + anchor + location) to
+  // the server whenever it changes while enabled. Debounced so rapid chip
+  // taps don't spam the API.
+  const syncReminder = useCallback(async () => {
+    try {
+      setReminderSyncState("saving");
+      const sub = await ensurePushSubscription();
+      await saveReminderSchedule(sub, {
+        anchor: reminderAnchor,
+        offsetMin: reminderOffset,
+        clockTime: reminderTime,
+        lat: reminderLocation?.lat ?? null,
+        lng: reminderLocation?.lng ?? null,
+        tz: deviceTimezone(),
+        localDate: todayLocalDate(),
+      });
+      setReminderSyncState("idle");
+      return true;
+    } catch (err) {
+      setReminderSyncState("error");
+      toast.error(err?.message || "Couldn't set up the reminder.");
+      return false;
+    }
+  }, [reminderAnchor, reminderOffset, reminderTime, reminderLocation]);
+
+  const reminderSyncTimerRef = useRef(null);
+  const reminderSyncSkipFirstRef = useRef(true);
+  useEffect(() => {
+    if (!reminderEnabled) return;
+    // Skip the post-hydration mount run — only re-sync on real changes, so a
+    // user with denied permissions isn't toasted on every app open.
+    if (reminderSyncSkipFirstRef.current) {
+      reminderSyncSkipFirstRef.current = false;
+      return;
+    }
+    clearTimeout(reminderSyncTimerRef.current);
+    reminderSyncTimerRef.current = setTimeout(syncReminder, 800);
+    return () => clearTimeout(reminderSyncTimerRef.current);
+  }, [reminderEnabled, reminderAnchor, reminderOffset, reminderTime, reminderLocation, syncReminder]);
+
+  const handleReminderToggle = useCallback(async () => {
+    if (reminderEnabled) {
+      setReminderEnabled(false);
+      setReminderSyncState("idle");
+      removeReminderSchedule();
+      return;
+    }
+    setReminderEnabled(true);
+    const ok = await syncReminder();
+    if (!ok) setReminderEnabled(false);
+  }, [reminderEnabled, setReminderEnabled, syncReminder]);
+
+  const handleUseLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      toast.error("Location isn't available in this browser.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setReminderLocation({
+          lat: Math.round(pos.coords.latitude * 100) / 100,
+          lng: Math.round(pos.coords.longitude * 100) / 100,
+        });
+      },
+      () => toast.error("Couldn't get your location. You can use a set time instead."),
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 3600_000 },
+    );
+  }, [setReminderLocation]);
 
   // Toggle a verse in the saved-verses bookmark list.
   const toggleSaveCurrentVerse = useCallback(() => {
@@ -1647,6 +1413,64 @@ export default function QuranProjectPage() {
     if (!currentAyah) return false;
     return savedVerses.some((v) => v.verseKey === currentAyah.key);
   }, [savedVerses, currentAyah]);
+
+  // Share a verse as an image card via the OS share sheet (or download).
+  const handleShareVerse = useCallback(async (verse) => {
+    try {
+      const result = await shareVerse(verse);
+      if (result === "downloaded") toast.success("Verse card saved as image");
+    } catch (err) {
+      console.error("Share error:", err);
+      toast.error("Couldn't create the share image.");
+    }
+  }, []);
+
+  // Total khatmah verses heard — drives the compact setup-view card.
+  const khatmahHeard = useMemo(
+    () => totalVersesHeard(khatmahVerses),
+    [khatmahVerses],
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Offline downloads — fetch the surah bundle (JSON is cached by the service
+  // worker) and store the full-surah mp3 in the Cache API.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  const handleDownloadSurah = useCallback(
+    async (surahId) => {
+      const dlKey = `${reciterId}:${surahId}`;
+      if (downloads[dlKey] || downloadingSurah) return;
+      setDownloadingSurah(dlKey);
+      try {
+        const data = await fetchSurahData(surahId);
+        await downloadAudio(data.audioUrl);
+        setDownloads((prev) => ({
+          ...prev,
+          [dlKey]: { surah: surahId, reciterId, audioUrl: data.audioUrl, at: Date.now() },
+        }));
+        toast.success(`${data.surahName} is ready for offline listening`);
+      } catch (err) {
+        console.error("Download error:", err);
+        toast.error("Download failed. Check your connection and try again.");
+      } finally {
+        setDownloadingSurah(null);
+      }
+    },
+    [reciterId, downloads, downloadingSurah, fetchSurahData, setDownloads],
+  );
+
+  const handleRemoveDownload = useCallback(
+    async (dlKey) => {
+      const entry = downloads[dlKey];
+      if (entry?.audioUrl) await removeAudio(entry.audioUrl).catch(() => {});
+      setDownloads((prev) => {
+        const next = { ...prev };
+        delete next[dlKey];
+        return next;
+      });
+    },
+    [downloads, setDownloads],
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Render
@@ -1709,630 +1533,643 @@ export default function QuranProjectPage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.2 }}
-                className="space-y-12"
+                className="space-y-10"
               >
-                {/* Resume prompt — surfaces last bookmark within 24h.
-                    One-tap to pick up where the listener left off. */}
-                <AnimatePresence>
-                  {showResumePrompt && lastSession && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
-                      transition={{ duration: 0.3, ease: "easeOut" }}
-                      className="overflow-hidden"
-                    >
-                      <div className="bg-white border border-warm-200 rounded-2xl p-4 flex items-center justify-between gap-4 shadow-card">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span
-                            className="block w-2 h-2 rounded-full shrink-0"
-                            style={{ backgroundColor: "var(--accent-gold)" }}
-                          />
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400">
-                              Pick up where you left off
-                            </p>
-                            <p className="text-sm font-bold truncate">
-                              Surah {lastSession.surahName} • Verse {lastSession.verseKey}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button
-                            onClick={handleDismissResume}
-                            className="text-xs font-bold uppercase tracking-widest text-warm-400 hover:text-warm-700 transition-colors px-2"
-                            aria-label="Dismiss resume prompt"
-                          >
-                            <Bi name="x-lg" size={12} />
-                          </button>
-                          <button
-                            onClick={handleResume}
-                            className="bg-black text-white px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest hover:scale-105 active:scale-95 transition-transform"
-                          >
-                            Resume
-                          </button>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Daily reminder banner — surfaces only if user has
-                    reminders on, time has passed, and they haven't
-                    listened today. Tap to start the configured session. */}
-                <AnimatePresence>
-                  {showReminderBanner && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
-                      transition={{ duration: 0.3, ease: "easeOut" }}
-                      className="overflow-hidden"
-                    >
-                      <div
-                        className="rounded-2xl p-4 flex items-center justify-between gap-4 shadow-card border"
-                        style={{
-                          backgroundColor: "var(--accent-gold-soft)",
-                          borderColor: "var(--accent-gold)",
-                        }}
-                      >
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-mono uppercase tracking-widest text-warm-700">
-                            Time for your daily listen
-                          </p>
-                          <p className="text-sm font-bold text-warm-900">
-                            Set for {reminderTime}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => setShowReminderBanner(false)}
-                          className="text-xs font-bold uppercase tracking-widest text-warm-700 hover:text-warm-900 transition-colors px-2"
-                          aria-label="Dismiss reminder"
+                    {/* Resume prompt — surfaces last bookmark within 24h.
+                        One-tap to pick up where the listener left off. */}
+                    <AnimatePresence>
+                      {showResumePrompt && lastSession && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -8 }}
+                          transition={{ duration: 0.3, ease: "easeOut" }}
+                          className="overflow-hidden"
                         >
-                          <Bi name="x-lg" size={12} />
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                          <div className="bg-white border border-warm-200 rounded-2xl p-4 flex items-center justify-between gap-4 shadow-card">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span
+                                className="block w-2 h-2 rounded-full shrink-0"
+                                style={{ backgroundColor: "var(--accent-gold)" }}
+                              />
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400">
+                                  Pick up where you left off
+                                </p>
+                                <p className="text-sm font-bold truncate">
+                                  Surah {lastSession.surahName} • Verse {lastSession.verseKey}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                onClick={handleDismissResume}
+                                className="text-xs font-bold uppercase tracking-widest text-warm-400 hover:text-warm-700 transition-colors px-2"
+                                aria-label="Dismiss resume prompt"
+                              >
+                                <Bi name="x-lg" size={12} />
+                              </button>
+                              <button
+                                onClick={handleResume}
+                                className="bg-black text-white px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest hover:scale-105 active:scale-95 transition-transform"
+                              >
+                                Resume
+                              </button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
-                <div className="space-y-6">
-                  <motion.div
-                    initial={{ scaleX: 0 }}
-                    animate={{ scaleX: 1 }}
-                    transition={{ duration: 0.4, ease: "easeOut" }}
-                    className="h-1 w-10 origin-left"
-                    style={{
-                      backgroundColor: "var(--accent-gold)",
-                      willChange: "transform",
-                    }}
-                  />
-                  <h2 className="font-resolide text-5xl md:text-7xl font-bold leading-[1.1] tracking-tight">
-                    {greeting.line1} <br />
-                    {greeting.line2}
-                  </h2>
-                  <p className="text-xl text-warm-500 max-w-sm leading-relaxed font-normal">
-                    {mode === "surah"
-                      ? "Pick a surah. Listen from the first verse to the last."
-                      : mode === "juz"
-                      ? "Pick a juz. Listen to all its surahs, start to finish."
-                      : "Choose how long and who recites. We'll never cut off mid-verse."}
-                  </p>
-                </div>
+                    {/* Daily reminder banner — surfaces only if user has
+                        reminders on, time has passed, and they haven't
+                        listened today. */}
+                    <AnimatePresence>
+                      {showReminderBanner && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -8 }}
+                          transition={{ duration: 0.3, ease: "easeOut" }}
+                          className="overflow-hidden"
+                        >
+                          <div
+                            className="rounded-2xl p-4 flex items-center justify-between gap-4 shadow-card border"
+                            style={{
+                              backgroundColor: "var(--accent-gold-soft)",
+                              borderColor: "var(--accent-gold)",
+                            }}
+                          >
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-mono uppercase tracking-widest text-warm-700">
+                                Time for your daily listen
+                              </p>
+                              <p className="text-sm font-bold text-warm-900">
+                                A few minutes is enough
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => setShowReminderBanner(false)}
+                              className="text-xs font-bold uppercase tracking-widest text-warm-700 hover:text-warm-900 transition-colors px-2"
+                              aria-label="Dismiss reminder"
+                            >
+                              <Bi name="x-lg" size={12} />
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
-                <div className="grid gap-8">
-                  {/* Mode Toggle */}
-                  <div className="flex gap-1 bg-warm-100 rounded-2xl p-1">
-                    <button
-                      onClick={() => setMode("random")}
-                      className={`flex-1 py-3 px-1 rounded-xl text-xs sm:text-sm font-bold leading-tight transition duration-300 ${
-                        mode === "random"
-                          ? "bg-white text-black shadow-sm"
-                          : "text-warm-400 hover:text-warm-500"
-                      }`}
-                    >
-                      Randomize Surah
-                    </button>
-                    <button
-                      onClick={() => setMode("surah")}
-                      className={`flex-1 py-3 px-1 rounded-xl text-xs sm:text-sm font-bold leading-tight transition duration-300 ${
-                        mode === "surah"
-                          ? "bg-white text-black shadow-sm"
-                          : "text-warm-400 hover:text-warm-500"
-                      }`}
-                    >
-                      Choose Surah
-                    </button>
-                    <button
-                      onClick={() => setMode("juz")}
-                      className={`flex-1 py-3 px-1 rounded-xl text-xs sm:text-sm font-bold leading-tight transition duration-300 ${
-                        mode === "juz"
-                          ? "bg-white text-black shadow-sm"
-                          : "text-warm-400 hover:text-warm-500"
-                      }`}
-                    >
-                      Choose Juz
-                    </button>
+                    <div className="space-y-6">
+                      <motion.div
+                        initial={{ scaleX: 0 }}
+                        animate={{ scaleX: 1 }}
+                        transition={{ duration: 0.4, ease: "easeOut" }}
+                        className="h-1 w-10 origin-left"
+                        style={{
+                          backgroundColor: "var(--accent-gold)",
+                          willChange: "transform",
+                        }}
+                      />
+                      <h2 className="font-resolide text-4xl md:text-6xl font-bold leading-[1.1] tracking-tight">
+                        {greeting.line1} <br />
+                        {greeting.line2}
+                      </h2>
+                    </div>
+
+                    {/* Khatmah progress strip — real progress on a meaningful
+                        goal, surfaced where the next session starts. */}
+                    {khatmahHeard > 0 && (
+                      <KhatmahCard
+                        heardMap={khatmahVerses}
+                        dailyLog={khatmahDailyLog}
+                        completions={khatmahCompletions}
+                        compact
+                      />
+                    )}
+
+                {/* One question at a time — progress hairline, big serif
+                    question, tappable answers. Single-choice answers
+                    auto-advance; input steps use Continue. */}
+                <div className="space-y-8">
+                  <div className="flex items-center gap-4">
+                    <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400 shrink-0 tabular-nums">
+                      {setupStepIndex + 1} <span className="text-warm-300">/ {setupSteps.length}</span>
+                    </p>
+                    <div className="flex-1 h-1 bg-warm-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${((setupStepIndex + 1) / setupSteps.length) * 100}%`,
+                          background:
+                            "linear-gradient(90deg, var(--accent-gold) 0%, var(--accent-gold-deep) 100%)",
+                          transition: "width 400ms ease-out",
+                        }}
+                      />
+                    </div>
+                    {setupStepIndex > 0 && (
+                      <button
+                        onClick={goBackStep}
+                        className="text-xs font-bold uppercase tracking-widest text-warm-400 hover:text-black transition-colors shrink-0"
+                      >
+                        ← Back
+                      </button>
+                    )}
                   </div>
 
                   <AnimatePresence mode="wait">
-                    {mode === "surah" ? (
-                      <motion.div
-                        key="surah-picker"
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -12 }}
-                        transition={{ duration: 0.25, ease: "easeOut" }}
-                        className="space-y-4"
-                      >
-                        <div className="flex items-center gap-2 text-warm-400">
-                          <Bi name="chevron-right" size={14} />
-                          <label className="text-xs font-mono uppercase tracking-widest">
-                            Which surah?
-                          </label>
-                        </div>
-                        <div className="relative">
-                          <select
-                            value={selectedSurah}
-                            onChange={(e) => setSelectedSurah(Number(e.target.value))}
-                            className="w-full appearance-none bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-bold focus:outline-none focus:ring-2 focus:ring-black/10 cursor-pointer"
-                          >
-                            {chapters.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.id}. {c.name_simple} ({c.name_arabic})
-                              </option>
-                            ))}
-                          </select>
-                          <Bi
-                            name="chevron-right"
-                            size={18}
-                            className="absolute right-4 top-1/2 -translate-y-1/2 text-warm-400 rotate-90 pointer-events-none"
-                          />
-                        </div>
-
-                        {/* Optional timer toggle for surah mode */}
-                        <div className="pt-4">
-                          <button
-                            onClick={() => setSurahTimerEnabled(!surahTimerEnabled)}
-                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors"
-                          >
-                            <span
-                              className={`w-8 h-5 rounded-full relative transition-colors ${
-                                surahTimerEnabled ? "bg-black" : "bg-warm-200"
+                    <motion.div
+                      key={currentSetupStep}
+                      initial={{ opacity: 0, x: 32 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -32 }}
+                      transition={{ duration: 0.25, ease: "easeOut" }}
+                      className="space-y-8"
+                    >
+                      {currentSetupStep === "mode" && (
+                        <>
+                          <h3 className="font-resolide text-3xl md:text-5xl font-bold tracking-tight leading-tight">
+                            How do you want <br /> to listen?
+                          </h3>
+                          <div className="grid gap-3">
+                            <button
+                              onClick={() => {
+                                setMode("random");
+                                goNextStepDelayed();
+                              }}
+                              className={`flex items-center gap-4 text-left rounded-2xl px-6 py-6 border transition duration-300 ${
+                                mode === "random"
+                                  ? "bg-black text-white border-black shadow-overlay"
+                                  : "bg-white border-warm-200 hover:border-black/20"
                               }`}
                             >
-                              <span
-                                className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
-                                style={{
-                                  transform: surahTimerEnabled ? "translateX(13px)" : "translateX(0)",
-                                  transition: "transform 180ms ease-out",
-                                  willChange: "transform",
-                                }}
-                              />
-                            </span>
-                            <span className="flex items-center gap-2">
-                              <Bi name="clock" size={12} />
-                              Add timer
-                            </span>
-                          </button>
-                        </div>
-
-                        <AnimatePresence>
-                          {surahTimerEnabled && (
-                            <motion.div
-                              initial={{ opacity: 0, y: -8 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, y: -8 }}
-                              transition={{ duration: 0.25, ease: "easeOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="space-y-2 pt-4">
-                                <div className="flex gap-2">
-                                  {DURATIONS.map((d) => (
-                                    <button
-                                      key={d.value}
-                                      onClick={() => {
-                                        setTargetDuration(d.value);
-                                        setCustomMinutes("");
-                                      }}
-                                      className={`relative flex-1 py-4 rounded-2xl text-lg font-bold transition duration-300 border ${
-                                        targetDuration === d.value && !customMinutes
-                                          ? "bg-black text-white border-black shadow-overlay"
-                                          : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
-                                      }`}
-                                    >
-                                      {d.label}
-                                    </button>
-                                  ))}
-                                </div>
-                                <div
-                                  className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition duration-300 ${
-                                    customMinutes
-                                      ? "bg-black border-black shadow-overlay"
-                                      : "bg-white border-warm-200 hover:border-black/20"
+                              <span className="text-2xl" aria-hidden="true">🎲</span>
+                              <span className="min-w-0">
+                                <span className="block text-lg font-bold">Surprise me</span>
+                                <span
+                                  className={`block text-sm mt-0.5 ${
+                                    mode === "random" ? "text-white/60" : "text-warm-400"
                                   }`}
                                 >
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max="120"
-                                    placeholder="Custom duration"
-                                    value={customMinutes}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setCustomMinutes(val);
-                                      if (val && Number(val) > 0) {
-                                        setTargetDuration(Number(val) * 60);
-                                      }
-                                    }}
-                                    className={`flex-1 bg-transparent outline-none text-lg font-bold placeholder:font-normal ${
-                                      customMinutes
-                                        ? "text-white placeholder:text-white/40"
-                                        : "text-warm-700 placeholder:text-warm-400"
-                                    }`}
-                                  />
-                                  <span
-                                    className={`text-sm font-bold uppercase tracking-widest ${
-                                      customMinutes ? "text-white/50" : "text-warm-400"
-                                    }`}
-                                  >
-                                    min
-                                  </span>
-                                </div>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-
-                        {/* Memorization toggle */}
-                        <div className="pt-2">
-                          <button
-                            onClick={() => setMemorizationEnabled(!memorizationEnabled)}
-                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors"
-                          >
-                            <span
-                              className={`w-8 h-5 rounded-full relative transition-colors ${
-                                memorizationEnabled ? "bg-black" : "bg-warm-200"
+                                  Random surahs for however long you have
+                                </span>
+                              </span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setMode("surah");
+                                goNextStepDelayed();
+                              }}
+                              className={`flex items-center gap-4 text-left rounded-2xl px-6 py-6 border transition duration-300 ${
+                                mode === "surah"
+                                  ? "bg-black text-white border-black shadow-overlay"
+                                  : "bg-white border-warm-200 hover:border-black/20"
                               }`}
                             >
-                              <span
-                                className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
-                                style={{
-                                  transform: memorizationEnabled ? "translateX(13px)" : "translateX(0)",
-                                  transition: "transform 180ms ease-out",
-                                  willChange: "transform",
+                              <span className="text-2xl" aria-hidden="true">📖</span>
+                              <span className="min-w-0">
+                                <span className="block text-lg font-bold">Choose a surah</span>
+                                <span
+                                  className={`block text-sm mt-0.5 ${
+                                    mode === "surah" ? "text-white/60" : "text-warm-400"
+                                  }`}
+                                >
+                                  Pick one and listen from the first verse to the last
+                                </span>
+                              </span>
+                            </button>
+                          </div>
+                        </>
+                      )}
+
+                      {currentSetupStep === "duration" && (
+                        <>
+                          <h3 className="font-resolide text-3xl md:text-5xl font-bold tracking-tight leading-tight">
+                            How long <br /> do you have?
+                          </h3>
+                          <div className="space-y-2">
+                            <div className="flex gap-2">
+                              {DURATIONS.map((d) => (
+                                <button
+                                  key={d.value}
+                                  onClick={() => {
+                                    setTargetDuration(d.value);
+                                    setCustomMinutes("");
+                                    goNextStepDelayed();
+                                  }}
+                                  className={`relative flex-1 py-6 rounded-2xl text-lg font-bold transition duration-300 border ${
+                                    targetDuration === d.value && !customMinutes
+                                      ? "bg-black text-white border-black shadow-overlay"
+                                      : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
+                                  }`}
+                                >
+                                  {d.label}
+                                </button>
+                              ))}
+                            </div>
+                            <div
+                              className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition duration-300 ${
+                                customMinutes
+                                  ? "bg-black border-black shadow-overlay"
+                                  : "bg-white border-warm-200 hover:border-black/20"
+                              }`}
+                            >
+                              <input
+                                type="number"
+                                min="1"
+                                max="120"
+                                placeholder="Custom duration"
+                                value={customMinutes}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setCustomMinutes(val);
+                                  if (val && Number(val) > 0) {
+                                    setTargetDuration(Number(val) * 60);
+                                  }
                                 }}
+                                className={`flex-1 bg-transparent outline-none text-lg font-bold placeholder:font-normal ${
+                                  customMinutes
+                                    ? "text-white placeholder:text-white/40"
+                                    : "text-warm-700 placeholder:text-warm-400"
+                                }`}
                               />
-                            </span>
-                            <span className="flex items-center gap-2">
-                              <Bi name="hearts" size={12} />
-                              Memorization mode
-                            </span>
-                          </button>
-                        </div>
-
-                        <AnimatePresence>
-                          {memorizationEnabled && (() => {
-                            const versesCount =
-                              chapters.find((c) => c.id === selectedSurah)?.verses_count || 1;
-                            const clamp = (n) => Math.min(Math.max(1, Number(n) || 1), versesCount);
-                            return (
-                              <motion.div
-                                initial={{ opacity: 0, y: -8 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -8 }}
-                                transition={{ duration: 0.25, ease: "easeOut" }}
-                                className="overflow-hidden"
+                              <span
+                                className={`text-sm font-bold uppercase tracking-widest ${
+                                  customMinutes ? "text-white/50" : "text-warm-400"
+                                }`}
                               >
-                                <div className="space-y-3 pt-4">
-                                  <div className="flex gap-2">
-                                    <div className="flex-1 bg-white border border-warm-200 rounded-2xl px-5 py-3">
-                                      <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400 mb-1">
-                                        Start verse
-                                      </p>
-                                      <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        pattern="[0-9]*"
-                                        value={memStartVerse}
-                                        onFocus={(e) => {
-                                          // setTimeout works around iOS Safari
-                                          // quirk where .select() during the focus
-                                          // event is overridden by the tap.
-                                          const el = e.currentTarget;
-                                          setTimeout(() => el.select(), 0);
-                                        }}
-                                        onChange={(e) => {
-                                          const raw = e.target.value.replace(/\D/g, "");
-                                          if (raw === "") {
-                                            setMemStartVerse("");
-                                            return;
-                                          }
-                                          const v = clamp(raw);
-                                          setMemStartVerse(v);
-                                          if (v > Number(memEndVerse)) setMemEndVerse(v);
-                                        }}
-                                        onBlur={() => {
-                                          if (!memStartVerse || Number(memStartVerse) < 1) {
-                                            setMemStartVerse(1);
-                                          }
-                                        }}
-                                        className="w-full bg-transparent outline-none text-lg font-bold text-warm-700"
-                                      />
-                                      <p className="text-[10px] text-warm-400 mt-1">
-                                        Max: {versesCount}
-                                      </p>
-                                    </div>
-                                    <div className="flex-1 bg-white border border-warm-200 rounded-2xl px-5 py-3">
-                                      <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400 mb-1">
-                                        End verse
-                                      </p>
-                                      <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        pattern="[0-9]*"
-                                        value={memEndVerse}
-                                        onFocus={(e) => {
-                                          const el = e.currentTarget;
-                                          setTimeout(() => el.select(), 0);
-                                        }}
-                                        onChange={(e) => {
-                                          const raw = e.target.value.replace(/\D/g, "");
-                                          if (raw === "") {
-                                            setMemEndVerse("");
-                                            return;
-                                          }
-                                          const v = clamp(raw);
-                                          setMemEndVerse(v);
-                                        }}
-                                        onBlur={() => {
-                                          const n = Number(memEndVerse);
-                                          if (!memEndVerse || n < Number(memStartVerse)) {
-                                            setMemEndVerse(Number(memStartVerse));
-                                          }
-                                        }}
-                                        className="w-full bg-transparent outline-none text-lg font-bold text-warm-700"
-                                      />
-                                      <p className="text-[10px] text-warm-400 mt-1">
-                                        Max: {versesCount}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <p className="text-[11px] text-warm-400 leading-snug">
-                                    Loops or stops at verse {memEndVerse} based on the toggle below.
-                                  </p>
+                                min
+                              </span>
+                            </div>
+                            {customMinutes && Number(customMinutes) > 0 && (
+                              <button
+                                onClick={goNextStep}
+                                className="w-full bg-black text-white rounded-2xl py-4 text-base font-bold mt-2 hover:scale-[1.01] active:scale-[0.99] transition"
+                              >
+                                Continue →
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
 
-                                  <button
-                                    onClick={() => setMemRepeat(!memRepeat)}
-                                    className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors pt-1"
-                                  >
-                                    <span
-                                      className={`w-8 h-5 rounded-full relative transition-colors ${
-                                        memRepeat ? "bg-black" : "bg-warm-200"
-                                      }`}
-                                    >
-                                      <span
-                                        className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
-                                        style={{
-                                          transform: memRepeat ? "translateX(13px)" : "translateX(0)",
-                                          transition: "transform 180ms ease-out",
-                                          willChange: "transform",
-                                        }}
-                                      />
-                                    </span>
-                                    <span>Play on repeat</span>
-                                  </button>
-                                </div>
-                              </motion.div>
-                            );
-                          })()}
-                        </AnimatePresence>
-                      </motion.div>
-                    ) : mode === "juz" ? (
-                      <motion.div
-                        key="juz-picker"
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -12 }}
-                        transition={{ duration: 0.25, ease: "easeOut" }}
-                        className="space-y-4"
-                      >
-                        <div className="flex items-center gap-2 text-warm-400">
-                          <Bi name="chevron-right" size={14} />
-                          <label className="text-xs font-mono uppercase tracking-widest">
-                            Which juz?
-                          </label>
-                        </div>
-                        <div className="relative">
-                          <select
-                            value={selectedJuz}
-                            onChange={(e) => setSelectedJuz(Number(e.target.value))}
-                            className="w-full appearance-none bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-bold focus:outline-none focus:ring-2 focus:ring-black/10 cursor-pointer"
-                          >
-                            {JUZ.map((j, i) => {
-                              const startName =
-                                chapters.find((c) => c.id === j.start[0])?.name_simple || "";
-                              return (
-                                <option key={i + 1} value={i + 1}>
-                                  Juz {i + 1} — {startName} {j.start[0]}:{j.start[1]}
-                                </option>
-                              );
-                            })}
-                          </select>
-                          <Bi
-                            name="chevron-right"
-                            size={18}
-                            className="absolute right-4 top-1/2 -translate-y-1/2 text-warm-400 rotate-90 pointer-events-none"
-                          />
-                        </div>
-                        <p className="text-[11px] text-warm-400 leading-snug">
-                          Plays the full juz, surah by surah, from beginning to end.
-                        </p>
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="duration-picker"
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -12 }}
-                        transition={{ duration: 0.25, ease: "easeOut" }}
-                        className="space-y-4"
-                      >
-                        <div className="flex items-center gap-2 text-warm-400">
-                          <Bi name="clock" size={14} />
-                          <label className="text-xs font-mono uppercase tracking-widest">
-                            How long?
-                          </label>
-                        </div>
-                        <div className="flex gap-2">
-                          {DURATIONS.map((d) => (
+                      {currentSetupStep === "mood" && (
+                        <>
+                          <h3 className="font-resolide text-3xl md:text-5xl font-bold tracking-tight leading-tight">
+                            How's your heart <br /> right now?
+                          </h3>
+                          <div className="grid grid-cols-2 gap-2">
                             <button
-                              key={d.value}
                               onClick={() => {
-                                setTargetDuration(d.value);
-                                setCustomMinutes("");
+                                setMoodEnabled(false);
+                                goNextStepDelayed(450);
                               }}
-                              className={`relative flex-1 py-4 rounded-2xl text-lg font-bold transition duration-300 border ${
-                                targetDuration === d.value && !customMinutes
+                              className={`flex items-center gap-2 py-4 px-4 rounded-2xl text-sm font-bold transition duration-300 border text-left ${
+                                !moodEnabled
                                   ? "bg-black text-white border-black shadow-overlay"
                                   : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
                               }`}
                             >
-                              {d.label}
+                              <span className="text-base">🎲</span>
+                              <span className="truncate">Surprise me</span>
                             </button>
-                          ))}
-                        </div>
-                        <div
-                          className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition duration-300 ${
-                            customMinutes
-                              ? "bg-black border-black shadow-overlay"
-                              : "bg-white border-warm-200 hover:border-black/20"
-                          }`}
-                        >
-                          <input
-                            type="number"
-                            min="1"
-                            max="120"
-                            placeholder="Custom duration"
-                            value={customMinutes}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setCustomMinutes(val);
-                              if (val && Number(val) > 0) {
-                                setTargetDuration(Number(val) * 60);
-                              }
-                            }}
-                            className={`flex-1 bg-transparent outline-none text-lg font-bold placeholder:font-normal ${
-                              customMinutes
-                                ? "text-white placeholder:text-white/40"
-                                : "text-warm-700 placeholder:text-warm-400"
-                            }`}
-                          />
-                          <span
-                            className={`text-sm font-bold uppercase tracking-widest ${
-                              customMinutes ? "text-white/50" : "text-warm-400"
-                            }`}
-                          >
-                            min
-                          </span>
-                        </div>
-
-                        {/* Optional mood toggle (random mode only) */}
-                        <div className="pt-4">
-                          <button
-                            onClick={() => setMoodEnabled(!moodEnabled)}
-                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors"
-                          >
-                            <span
-                              className={`w-8 h-5 rounded-full relative transition-colors ${
-                                moodEnabled ? "bg-black" : "bg-warm-200"
-                              }`}
-                            >
-                              <span
-                                className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
-                                style={{
-                                  transform: moodEnabled ? "translateX(13px)" : "translateX(0)",
-                                  transition: "transform 180ms ease-out",
-                                  willChange: "transform",
+                            {MOODS.map((m) => (
+                              <button
+                                key={m.id}
+                                onClick={() => {
+                                  setMoodEnabled(true);
+                                  setSelectedMood(m.id);
+                                  goNextStepDelayed(450);
                                 }}
-                              />
-                            </span>
-                            <span className="flex items-center gap-2">
-                              <Bi name="hearts" size={12} />
-                              Feeling a certain way?
-                            </span>
-                          </button>
-                        </div>
+                                className={`flex items-center gap-2 py-4 px-4 rounded-2xl text-sm font-bold transition duration-300 border text-left ${
+                                  moodEnabled && selectedMood === m.id
+                                    ? "bg-black text-white border-black shadow-overlay"
+                                    : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
+                                }`}
+                              >
+                                <span className="text-base">{m.emoji}</span>
+                                <span className="truncate">{m.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
 
-                        <AnimatePresence>
-                          {moodEnabled && (
-                            <motion.div
-                              initial={{ opacity: 0, y: -8 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, y: -8 }}
-                              transition={{ duration: 0.25, ease: "easeOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-2 gap-2 pt-4">
-                                {MOODS.map((m) => (
-                                  <button
-                                    key={m.id}
-                                    onClick={() => setSelectedMood(m.id)}
-                                    className={`flex items-center gap-2 py-3 px-4 rounded-2xl text-sm font-bold transition duration-300 border text-left ${
-                                      selectedMood === m.id
-                                        ? "bg-black text-white border-black shadow-overlay"
-                                        : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
-                                    }`}
-                                  >
-                                    <span className="text-base">{m.emoji}</span>
-                                    <span className="truncate">{m.label}</span>
-                                  </button>
+                      {currentSetupStep === "surah" && (
+                        <>
+                          <h3 className="font-resolide text-3xl md:text-5xl font-bold tracking-tight leading-tight">
+                            Which surah?
+                          </h3>
+                          <div className="space-y-4">
+                            <div className="relative">
+                              <select
+                                value={selectedSurah}
+                                onChange={(e) => setSelectedSurah(Number(e.target.value))}
+                                className="w-full appearance-none bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-bold focus:outline-none focus:ring-2 focus:ring-black/10 cursor-pointer"
+                              >
+                                {chapters.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.id}. {c.name_simple} ({c.name_arabic})
+                                  </option>
                                 ))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </motion.div>
-                    )}
+                              </select>
+                              <Bi
+                                name="chevron-right"
+                                size={18}
+                                className="absolute right-4 top-1/2 -translate-y-1/2 text-warm-400 rotate-90 pointer-events-none"
+                              />
+                            </div>
+
+                            {/* Optional timer toggle for surah mode */}
+                            <div className="pt-2">
+                              <button
+                                onClick={() => setSurahTimerEnabled(!surahTimerEnabled)}
+                                className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors"
+                              >
+                                <span
+                                  className={`w-8 h-5 rounded-full relative transition-colors ${
+                                    surahTimerEnabled ? "bg-black" : "bg-warm-200"
+                                  }`}
+                                >
+                                  <span
+                                    className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
+                                    style={{
+                                      transform: surahTimerEnabled ? "translateX(13px)" : "translateX(0)",
+                                      transition: "transform 180ms ease-out",
+                                      willChange: "transform",
+                                    }}
+                                  />
+                                </span>
+                                <span className="flex items-center gap-2">
+                                  <Bi name="clock" size={12} />
+                                  Add timer
+                                </span>
+                              </button>
+                            </div>
+
+                            <AnimatePresence>
+                              {surahTimerEnabled && (
+                                <motion.div
+                                  initial={{ opacity: 0, y: -8 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  exit={{ opacity: 0, y: -8 }}
+                                  transition={{ duration: 0.25, ease: "easeOut" }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="space-y-2 pt-2">
+                                    <div className="flex gap-2">
+                                      {DURATIONS.map((d) => (
+                                        <button
+                                          key={d.value}
+                                          onClick={() => {
+                                            setTargetDuration(d.value);
+                                            setCustomMinutes("");
+                                          }}
+                                          className={`relative flex-1 py-4 rounded-2xl text-lg font-bold transition duration-300 border ${
+                                            targetDuration === d.value && !customMinutes
+                                              ? "bg-black text-white border-black shadow-overlay"
+                                              : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
+                                          }`}
+                                        >
+                                          {d.label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    <div
+                                      className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition duration-300 ${
+                                        customMinutes
+                                          ? "bg-black border-black shadow-overlay"
+                                          : "bg-white border-warm-200 hover:border-black/20"
+                                      }`}
+                                    >
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        max="120"
+                                        placeholder="Custom duration"
+                                        value={customMinutes}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setCustomMinutes(val);
+                                          if (val && Number(val) > 0) {
+                                            setTargetDuration(Number(val) * 60);
+                                          }
+                                        }}
+                                        className={`flex-1 bg-transparent outline-none text-lg font-bold placeholder:font-normal ${
+                                          customMinutes
+                                            ? "text-white placeholder:text-white/40"
+                                            : "text-warm-700 placeholder:text-warm-400"
+                                        }`}
+                                      />
+                                      <span
+                                        className={`text-sm font-bold uppercase tracking-widest ${
+                                          customMinutes ? "text-white/50" : "text-warm-400"
+                                        }`}
+                                      >
+                                        min
+                                      </span>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+
+                            {/* Memorization toggle */}
+                            <div className="pt-2">
+                              <button
+                                onClick={() => setMemorizationEnabled(!memorizationEnabled)}
+                                className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors"
+                              >
+                                <span
+                                  className={`w-8 h-5 rounded-full relative transition-colors ${
+                                    memorizationEnabled ? "bg-black" : "bg-warm-200"
+                                  }`}
+                                >
+                                  <span
+                                    className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
+                                    style={{
+                                      transform: memorizationEnabled ? "translateX(13px)" : "translateX(0)",
+                                      transition: "transform 180ms ease-out",
+                                      willChange: "transform",
+                                    }}
+                                  />
+                                </span>
+                                <span className="flex items-center gap-2">
+                                  <Bi name="hearts" size={12} />
+                                  Memorization mode
+                                </span>
+                              </button>
+                            </div>
+
+                            <AnimatePresence>
+                              {memorizationEnabled && (() => {
+                                const versesCount =
+                                  chapters.find((c) => c.id === selectedSurah)?.verses_count || 1;
+                                const clamp = (n) => Math.min(Math.max(1, Number(n) || 1), versesCount);
+                                return (
+                                  <motion.div
+                                    initial={{ opacity: 0, y: -8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -8 }}
+                                    transition={{ duration: 0.25, ease: "easeOut" }}
+                                    className="overflow-hidden"
+                                  >
+                                    <div className="space-y-3 pt-2">
+                                      <div className="flex gap-2">
+                                        <div className="flex-1 bg-white border border-warm-200 rounded-2xl px-5 py-3">
+                                          <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400 mb-1">
+                                            Start verse
+                                          </p>
+                                          <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            pattern="[0-9]*"
+                                            value={memStartVerse}
+                                            onFocus={(e) => {
+                                              const el = e.currentTarget;
+                                              setTimeout(() => el.select(), 0);
+                                            }}
+                                            onChange={(e) => {
+                                              const raw = e.target.value.replace(/\D/g, "");
+                                              if (raw === "") {
+                                                setMemStartVerse("");
+                                                return;
+                                              }
+                                              const v = clamp(raw);
+                                              setMemStartVerse(v);
+                                              if (v > Number(memEndVerse)) setMemEndVerse(v);
+                                            }}
+                                            onBlur={() => {
+                                              if (!memStartVerse || Number(memStartVerse) < 1) {
+                                                setMemStartVerse(1);
+                                              }
+                                            }}
+                                            className="w-full bg-transparent outline-none text-lg font-bold text-warm-700"
+                                          />
+                                          <p className="text-[10px] text-warm-400 mt-1">
+                                            Max: {versesCount}
+                                          </p>
+                                        </div>
+                                        <div className="flex-1 bg-white border border-warm-200 rounded-2xl px-5 py-3">
+                                          <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400 mb-1">
+                                            End verse
+                                          </p>
+                                          <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            pattern="[0-9]*"
+                                            value={memEndVerse}
+                                            onFocus={(e) => {
+                                              const el = e.currentTarget;
+                                              setTimeout(() => el.select(), 0);
+                                            }}
+                                            onChange={(e) => {
+                                              const raw = e.target.value.replace(/\D/g, "");
+                                              if (raw === "") {
+                                                setMemEndVerse("");
+                                                return;
+                                              }
+                                              const v = clamp(raw);
+                                              setMemEndVerse(v);
+                                            }}
+                                            onBlur={() => {
+                                              const n = Number(memEndVerse);
+                                              if (!memEndVerse || n < Number(memStartVerse)) {
+                                                setMemEndVerse(Number(memStartVerse));
+                                              }
+                                            }}
+                                            className="w-full bg-transparent outline-none text-lg font-bold text-warm-700"
+                                          />
+                                          <p className="text-[10px] text-warm-400 mt-1">
+                                            Max: {versesCount}
+                                          </p>
+                                        </div>
+                                      </div>
+                                      <p className="text-[11px] text-warm-400 leading-snug">
+                                        Loops or stops at verse {memEndVerse} based on the toggle below.
+                                      </p>
+
+                                      <button
+                                        onClick={() => setMemRepeat(!memRepeat)}
+                                        className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors pt-1"
+                                      >
+                                        <span
+                                          className={`w-8 h-5 rounded-full relative transition-colors ${
+                                            memRepeat ? "bg-black" : "bg-warm-200"
+                                          }`}
+                                        >
+                                          <span
+                                            className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
+                                            style={{
+                                              transform: memRepeat ? "translateX(13px)" : "translateX(0)",
+                                              transition: "transform 180ms ease-out",
+                                              willChange: "transform",
+                                            }}
+                                          />
+                                        </span>
+                                        <span>Play on repeat</span>
+                                      </button>
+                                    </div>
+                                  </motion.div>
+                                );
+                              })()}
+                            </AnimatePresence>
+
+                            <button
+                              onClick={goNextStep}
+                              className="w-full bg-black text-white rounded-2xl py-4 text-base font-bold hover:scale-[1.01] active:scale-[0.99] transition"
+                            >
+                              Continue →
+                            </button>
+                          </div>
+                        </>
+                      )}
+
+                      {currentSetupStep === "reciter" && (
+                        <>
+                          <h3 className="font-resolide text-3xl md:text-5xl font-bold tracking-tight leading-tight">
+                            Who recites <br /> for you?
+                          </h3>
+                          {mode === "random" && moodEnabled && (() => {
+                            const mood = MOODS.find((m) => m.id === selectedMood) || MOODS[0];
+                            return (
+                              <p className="text-sm text-warm-500 italic leading-relaxed">
+                                “{mood.promise}”{" "}
+                                <span className="not-italic text-warm-400">— Quran {mood.ref}</span>
+                              </p>
+                            );
+                          })()}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {RECITERS.map((r) => (
+                              <button
+                                key={r.id}
+                                onClick={() => setReciterId(r.id)}
+                                className={`py-3 px-4 rounded-2xl text-sm font-bold transition duration-300 border text-left ${
+                                  reciterId === r.id
+                                    ? "bg-black text-white border-black shadow-overlay"
+                                    : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
+                                }`}
+                              >
+                                {r.name}
+                              </button>
+                            ))}
+                          </div>
+                          <button
+                            onClick={startPlayback}
+                            className="w-full bg-black text-white rounded-2xl py-6 text-xl font-bold shadow-dropdown hover:shadow-black/40 hover:-translate-y-0.5 active:translate-y-0 transition flex items-center justify-center gap-3 group"
+                          >
+                            Start Listening
+                            <Bi
+                              name="play-fill"
+                              size={22}
+                              className="group-hover:scale-110 transition-transform"
+                            />
+                          </button>
+                        </>
+                      )}
+                    </motion.div>
                   </AnimatePresence>
-
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-2 text-warm-400">
-                      <Bi name="globe" size={14} />
-                      <label className="text-xs font-mono uppercase tracking-widest">
-                        Who recites?
-                      </label>
-                    </div>
-                    <div className="relative">
-                      <select
-                        value={reciterId}
-                        onChange={(e) => setReciterId(Number(e.target.value))}
-                        className="w-full bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-medium appearance-none cursor-pointer focus:outline-none focus:ring-4 focus:ring-black/5 transition"
-                      >
-                        {RECITERS.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.name}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none text-warm-400">
-                        <Bi name="chevron-right" size={20} className="rotate-90" />
-                      </div>
-                    </div>
-                  </div>
                 </div>
-
-                <button
-                  onClick={startPlayback}
-                  className="w-full bg-black text-white rounded-2xl py-6 text-xl font-bold shadow-dropdown hover:shadow-black/40 hover:-translate-y-0.5 active:translate-y-0 transition flex items-center justify-center gap-3 group"
-                >
-                  Start Listening
-                  <Bi
-                    name="play-fill"
-                    size={22}
-                    className="group-hover:scale-110 transition-transform"
-                  />
-                </button>
               </motion.div>
             )}
 
@@ -2377,26 +2214,16 @@ export default function QuranProjectPage() {
                         Loading recitation
                       </p>
                       <p className="text-2xl font-resolide font-bold tracking-tight">
-                        {(() => {
-                          if (mode === "surah") {
-                            return (
-                              chapters.find((c) => c.id === selectedSurah)?.name_simple ||
-                              "Surah"
-                            );
-                          }
-                          if (mode === "juz") {
-                            const seg = juzSegmentsRef.current[juzIndexRef.current];
-                            const sid = surahDataRef.current?.surah || seg?.surah;
-                            return (
-                              chapters.find((c) => c.id === sid)?.name_simple ||
-                              `Juz ${selectedJuz}`
-                            );
-                          }
-                          return (
-                            chapters.find((c) => c.id === surahDataRef.current?.surah)
-                              ?.name_simple || "Random surah"
-                          );
-                        })()}
+                        {chapters.find(
+                          (c) =>
+                            c.id ===
+                            (mode === "surah"
+                              ? selectedSurah
+                              : surahDataRef.current?.surah),
+                        )?.name_simple ||
+                          (mode === "surah"
+                            ? chapters.find((c) => c.id === selectedSurah)?.name_simple
+                            : "Random surah")}
                       </p>
                       <p className="text-sm text-warm-500">
                         {RECITERS.find((r) => r.id === reciterId)?.name}
@@ -2595,7 +2422,6 @@ export default function QuranProjectPage() {
                     targetDuration={targetDuration}
                     surahDataRef={surahDataRef}
                     audioRef={audioRef}
-                    playPlaylistAyah={playPlaylistAyah}
                   />
                 </div>
               </motion.div>
@@ -2638,33 +2464,33 @@ export default function QuranProjectPage() {
                       ? `${targetDuration / 60} minutes with Surah ${chapters.find((c) => c.id === selectedSurah)?.name_simple || ""}. May Allah bless your consistency.`
                       : mode === "surah"
                       ? `Surah ${chapters.find((c) => c.id === selectedSurah)?.name_simple || ""}, beginning to end. May Allah bless your consistency.`
-                      : mode === "juz"
-                      ? `Juz ${selectedJuz}, beginning to end. May Allah bless your consistency.`
                       : `${targetDuration / 60} minutes with the words of Allah. May He bless your consistency.`}
                   </p>
                 </div>
 
-                {/* Streak reveal — surfaces only at the end of a session.
-                    Self reward made visible at the moment the user just
-                    earned it. Hidden during setup so it never feels naggy. */}
-                {streak.count > 0 && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.4, duration: 0.5, ease: "easeOut" }}
-                    className="inline-flex items-center gap-3 mx-auto px-5 py-3 bg-white border border-warm-200 rounded-full shadow-card"
-                  >
-                    <span className="text-xl" aria-hidden="true">🔥</span>
-                    <div className="text-left">
-                      <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400">
-                        Listening streak
-                      </p>
-                      <p className="text-lg font-bold font-mono tabular-nums leading-none">
-                        {streak.count} day{streak.count === 1 ? "" : "s"}
+                {/* Khatmah progress — the hero reward at session end. Real,
+                    meaningful progress (finishing the Quran) instead of an
+                    abstract counter; the streak survives as a small chip. */}
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4, duration: 0.5, ease: "easeOut" }}
+                  className="space-y-4"
+                >
+                  <KhatmahCard
+                    heardMap={khatmahVerses}
+                    dailyLog={khatmahDailyLog}
+                    completions={khatmahCompletions}
+                  />
+                  {streak.count > 0 && (
+                    <div className="inline-flex items-center gap-2 mx-auto px-4 py-2 bg-white border border-warm-200 rounded-full shadow-card">
+                      <span className="text-base" aria-hidden="true">🔥</span>
+                      <p className="text-xs font-bold font-mono tabular-nums">
+                        {streak.count} day{streak.count === 1 ? "" : "s"} in a row
                       </p>
                     </div>
-                  </motion.div>
-                )}
+                  )}
+                </motion.div>
 
                 <div className="flex flex-col gap-4 pt-12">
                   <button
@@ -2756,20 +2582,13 @@ export default function QuranProjectPage() {
 
                   <div className="h-px bg-warm-100" />
 
-                  {/* Daily reminder — opt-in nudge at chosen time */}
-                  <div className="py-3 space-y-3">
+                  {/* Daily reminder — Web Push anchored to a prayer time.
+                      Prayer is the one daily trigger that already fires five
+                      times — the reminder stacks onto it instead of competing
+                      with a random clock time. */}
+                  <div className="py-3 space-y-4">
                     <button
-                      onClick={async () => {
-                        const next = !reminderEnabled;
-                        setReminderEnabled(next);
-                        if (next && typeof Notification !== "undefined" && Notification.permission === "default") {
-                          await Notification.requestPermission();
-                        }
-                        // Schedule (or clear) closed-app reminders now that the
-                        // toggle and permission are settled — pass `next`
-                        // explicitly since state hasn't re-rendered yet.
-                        scheduleTriggeredReminders(next);
-                      }}
+                      onClick={handleReminderToggle}
                       className="w-full flex items-start justify-between gap-4 text-left"
                     >
                       <div className="flex-1">
@@ -2777,7 +2596,7 @@ export default function QuranProjectPage() {
                           Daily reminder
                         </p>
                         <p className="text-sm text-warm-400 leading-snug mt-1">
-                          Get a notification at your chosen time if you haven't listened yet.
+                          A push notification after your chosen prayer — even when the app is closed.
                         </p>
                       </div>
                       <span
@@ -2796,19 +2615,196 @@ export default function QuranProjectPage() {
                       </span>
                     </button>
                     {reminderEnabled && (
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-mono uppercase tracking-widest text-warm-400">
-                          Time
-                        </span>
-                        <input
-                          type="time"
-                          value={reminderTime}
-                          onChange={(e) => setReminderTime(e.target.value)}
-                          className="bg-warm-100 rounded-lg px-3 py-2 text-sm font-bold text-warm-900 outline-none border border-warm-200 focus:border-black/30"
-                        />
+                      <div className="space-y-4">
+                        <div>
+                          <p className="text-xs font-mono uppercase tracking-widest text-warm-400 mb-2">
+                            Remind me after
+                          </p>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {PRAYER_ANCHORS.map((a) => (
+                              <button
+                                key={a.id}
+                                onClick={() => setReminderAnchor(a.id)}
+                                className={`py-2 rounded-xl text-sm font-bold transition border ${
+                                  reminderAnchor === a.id
+                                    ? "bg-black text-white border-black"
+                                    : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
+                                }`}
+                              >
+                                {a.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {reminderAnchor !== "clock" ? (
+                          <>
+                            <div>
+                              <p className="text-xs font-mono uppercase tracking-widest text-warm-400 mb-2">
+                                How long after the adhan?
+                              </p>
+                              <div className="flex gap-1.5">
+                                {[0, 15, 30, 60].map((min) => (
+                                  <button
+                                    key={min}
+                                    onClick={() => setReminderOffset(min)}
+                                    className={`flex-1 py-2 rounded-xl text-sm font-bold transition border ${
+                                      reminderOffset === min
+                                        ? "bg-black text-white border-black"
+                                        : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
+                                    }`}
+                                  >
+                                    {min === 0 ? "Right away" : `+${min}m`}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {reminderLocation ? (
+                              <div className="flex items-center justify-between gap-3 bg-warm-50 border border-warm-200 rounded-xl px-4 py-3">
+                                <p className="text-sm text-warm-700">
+                                  {(() => {
+                                    const target = reminderTargetToday({
+                                      anchor: reminderAnchor,
+                                      offsetMin: reminderOffset,
+                                      lat: reminderLocation.lat,
+                                      lng: reminderLocation.lng,
+                                    });
+                                    return (
+                                      <>
+                                        Today's reminder:{" "}
+                                        <span className="font-bold">{formatClock(target)}</span>
+                                      </>
+                                    );
+                                  })()}
+                                </p>
+                                <button
+                                  onClick={handleUseLocation}
+                                  className="text-xs font-bold uppercase tracking-widest text-warm-400 hover:text-black transition-colors shrink-0"
+                                >
+                                  Update
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={handleUseLocation}
+                                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-warm-200 bg-white text-sm font-bold text-warm-700 hover:border-black/30 transition"
+                              >
+                                <MapPin size={14} />
+                                Use my location for prayer times
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs font-mono uppercase tracking-widest text-warm-400">
+                              Time
+                            </span>
+                            <input
+                              type="time"
+                              value={reminderTime}
+                              onChange={(e) => setReminderTime(e.target.value)}
+                              className="bg-warm-100 rounded-lg px-3 py-2 text-sm font-bold text-warm-900 outline-none border border-warm-200 focus:border-black/30"
+                            />
+                          </div>
+                        )}
+
+                        {reminderSyncState === "saving" && (
+                          <p className="text-xs text-warm-400">Saving reminder…</p>
+                        )}
+                        {reminderSyncState === "error" && (
+                          <p className="text-xs text-red-500">
+                            Couldn't sync — notifications may not arrive. Check permissions and try again.
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
+
+                  <div className="h-px bg-warm-100" />
+
+                  {/* Offline listening — explicit per-surah downloads kept in
+                      the Cache API; the service worker serves them when the
+                      network is gone. */}
+                  {offlineSupported() && (
+                    <div className="py-3 space-y-3">
+                      <div>
+                        <p className="text-base font-bold text-warm-900">
+                          Offline listening
+                        </p>
+                        <p className="text-sm text-warm-400 leading-snug mt-1">
+                          Download surahs with{" "}
+                          {RECITERS.find((r) => r.id === reciterId)?.name} for the commute, flights, or weak signal.
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <select
+                            value={offlineSurahPick}
+                            onChange={(e) => setOfflineSurahPick(Number(e.target.value))}
+                            className="w-full appearance-none bg-white border border-warm-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none cursor-pointer"
+                          >
+                            {chapters.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.id}. {c.name_simple}
+                              </option>
+                            ))}
+                          </select>
+                          <Bi
+                            name="chevron-right"
+                            size={14}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-warm-400 rotate-90 pointer-events-none"
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleDownloadSurah(offlineSurahPick)}
+                          disabled={
+                            Boolean(downloadingSurah) ||
+                            Boolean(downloads[`${reciterId}:${offlineSurahPick}`])
+                          }
+                          className="px-4 py-3 rounded-xl bg-black text-white text-sm font-bold flex items-center gap-2 disabled:opacity-40 hover:scale-[1.02] active:scale-95 transition"
+                        >
+                          {downloadingSurah === `${reciterId}:${offlineSurahPick}` ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Download size={14} />
+                          )}
+                          {downloads[`${reciterId}:${offlineSurahPick}`]
+                            ? "Saved"
+                            : "Download"}
+                        </button>
+                      </div>
+                      {Object.keys(downloads).length > 0 && (
+                        <div className="space-y-1.5">
+                          {Object.entries(downloads)
+                            .sort(([, a], [, b]) => b.at - a.at)
+                            .map(([dlKey, entry]) => (
+                              <div
+                                key={dlKey}
+                                className="flex items-center justify-between gap-3 bg-warm-50 border border-warm-200 rounded-xl px-4 py-2.5"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-sm font-bold truncate">
+                                    {chapters.find((c) => c.id === entry.surah)?.name_simple ||
+                                      `Surah ${entry.surah}`}
+                                  </p>
+                                  <p className="text-[11px] text-warm-400 truncate">
+                                    {RECITERS.find((r) => r.id === entry.reciterId)?.name}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => handleRemoveDownload(dlKey)}
+                                  aria-label="Remove download"
+                                  className="text-warm-400 hover:text-red-500 transition-colors shrink-0"
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="h-px bg-warm-100" />
 
@@ -3082,17 +3078,26 @@ export default function QuranProjectPage() {
                           <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400">
                             {v.surahName} • {v.verseKey}
                           </p>
-                          <button
-                            onClick={() =>
-                              setSavedVerses((prev) =>
-                                prev.filter((x) => x.verseKey !== v.verseKey),
-                              )
-                            }
-                            aria-label={`Remove verse ${v.verseKey}`}
-                            className="text-warm-400 hover:text-warm-700 transition-colors shrink-0"
-                          >
-                            <Bi name="x-lg" size={10} />
-                          </button>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <button
+                              onClick={() => handleShareVerse(v)}
+                              aria-label={`Share verse ${v.verseKey}`}
+                              className="text-warm-400 hover:text-black transition-colors"
+                            >
+                              <Share2 size={13} />
+                            </button>
+                            <button
+                              onClick={() =>
+                                setSavedVerses((prev) =>
+                                  prev.filter((x) => x.verseKey !== v.verseKey),
+                                )
+                              }
+                              aria-label={`Remove verse ${v.verseKey}`}
+                              className="text-warm-400 hover:text-warm-700 transition-colors"
+                            >
+                              <Bi name="x-lg" size={10} />
+                            </button>
+                          </div>
                         </div>
                         <p className="font-serif text-lg leading-snug text-right" dir="rtl">
                           {v.text}

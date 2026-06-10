@@ -2,6 +2,9 @@
   command = "NETLIFY=true bun install && NETLIFY=true npx react-router build && cp build/server/index.js build/server/server.js"
   publish = "build/client"
 
+[functions]
+  directory = "netlify/functions"
+
 [dev]
   command = "bun run dev"
   port = 4000
