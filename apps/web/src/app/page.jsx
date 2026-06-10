@@ -537,28 +537,6 @@ export default function QuranProjectPage() {
   const [offlineSurahPick, setOfflineSurahPick] = useState(1);
 
   // One-question-at-a-time setup (Typeform-style). The step list depends on
-  // the chosen mode; single-choice answers auto-advance after a beat so the
-  // selection is seen, while steps with inputs use an explicit Continue.
-  const [setupStep, setSetupStep] = useState(0);
-  const advanceTimerRef = useRef(null);
-  const goBackStep = useCallback(() => setSetupStep((s) => Math.max(0, s - 1)), []);
-  const goNextStep = useCallback(() => setSetupStep((s) => s + 1), []);
-  const goNextStepDelayed = useCallback((ms = 350) => {
-    clearTimeout(advanceTimerRef.current);
-    advanceTimerRef.current = setTimeout(() => setSetupStep((s) => s + 1), ms);
-  }, []);
-  useEffect(() => () => clearTimeout(advanceTimerRef.current), []);
-  // Every return to the setup view starts the questions over.
-  useEffect(() => {
-    if (view === "setup") setSetupStep(0);
-  }, [view]);
-  const setupSteps =
-    mode === "surah"
-      ? ["mode", "surah", "reciter"]
-      : ["mode", "duration", "mood", "reciter"];
-  const setupStepIndex = Math.min(setupStep, setupSteps.length - 1);
-  const currentSetupStep = setupSteps[setupStepIndex];
-
   // Single audio element — plays the full surah as one file (no gap problem)
   const audioRef = useRef(null);
 
@@ -1648,183 +1626,412 @@ export default function QuranProjectPage() {
                       />
                     )}
 
-                {/* One question at a time — progress hairline, big serif
-                    question, tappable answers. Single-choice answers
-                    auto-advance; input steps use Continue. */}
-                <div className="space-y-8">
-                  <div className="flex items-center gap-4">
-                    <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400 shrink-0 tabular-nums">
-                      {setupStepIndex + 1} <span className="text-warm-300">/ {setupSteps.length}</span>
-                    </p>
-                    <div className="flex-1 h-1 bg-warm-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${((setupStepIndex + 1) / setupSteps.length) * 100}%`,
-                          background:
-                            "linear-gradient(90deg, var(--accent-gold) 0%, var(--accent-gold-deep) 100%)",
-                          transition: "width 400ms ease-out",
-                        }}
-                      />
-                    </div>
-                    {setupStepIndex > 0 && (
-                      <button
-                        onClick={goBackStep}
-                        className="text-xs font-bold uppercase tracking-widest text-warm-400 hover:text-black transition-colors shrink-0"
-                      >
-                        ← Back
-                      </button>
-                    )}
+                <div className="grid gap-8">
+                  {/* Mode Toggle */}
+                  <div className="flex gap-1 bg-warm-100 rounded-2xl p-1">
+                    <button
+                      onClick={() => setMode("random")}
+                      className={`flex-1 py-3 px-1 rounded-xl text-xs sm:text-sm font-bold leading-tight transition duration-300 ${
+                        mode === "random"
+                          ? "bg-white text-black shadow-sm"
+                          : "text-warm-400 hover:text-warm-500"
+                      }`}
+                    >
+                      Randomize Surah
+                    </button>
+                    <button
+                      onClick={() => setMode("surah")}
+                      className={`flex-1 py-3 px-1 rounded-xl text-xs sm:text-sm font-bold leading-tight transition duration-300 ${
+                        mode === "surah"
+                          ? "bg-white text-black shadow-sm"
+                          : "text-warm-400 hover:text-warm-500"
+                      }`}
+                    >
+                      Choose Surah
+                    </button>
+                    <button
+                      onClick={() => setMode("juz")}
+                      className={`flex-1 py-3 px-1 rounded-xl text-xs sm:text-sm font-bold leading-tight transition duration-300 ${
+                        mode === "juz"
+                          ? "bg-white text-black shadow-sm"
+                          : "text-warm-400 hover:text-warm-500"
+                      }`}
+                    >
+                      Choose Juz
+                    </button>
                   </div>
 
                   <AnimatePresence mode="wait">
-                    <motion.div
-                      key={currentSetupStep}
-                      initial={{ opacity: 0, x: 32 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -32 }}
-                      transition={{ duration: 0.25, ease: "easeOut" }}
-                      className="space-y-8"
-                    >
-                      {currentSetupStep === "mode" && (
-                        <>
-                          <h3 className="font-resolide text-3xl md:text-5xl font-bold tracking-tight leading-tight">
-                            How do you want <br /> to listen?
-                          </h3>
-                          <div className="grid gap-3">
-                            <button
-                              onClick={() => {
-                                setMode("random");
-                                goNextStepDelayed();
-                              }}
-                              className={`flex items-center gap-4 text-left rounded-2xl px-6 py-6 border transition duration-300 ${
-                                mode === "random"
-                                  ? "bg-black text-white border-black shadow-overlay"
-                                  : "bg-white border-warm-200 hover:border-black/20"
-                              }`}
-                            >
-                              <span className="text-2xl" aria-hidden="true">🎲</span>
-                              <span className="min-w-0">
-                                <span className="block text-lg font-bold">Surprise me</span>
-                                <span
-                                  className={`block text-sm mt-0.5 ${
-                                    mode === "random" ? "text-white/60" : "text-warm-400"
-                                  }`}
-                                >
-                                  Random surahs for however long you have
-                                </span>
-                              </span>
-                            </button>
-                            <button
-                              onClick={() => {
-                                setMode("surah");
-                                goNextStepDelayed();
-                              }}
-                              className={`flex items-center gap-4 text-left rounded-2xl px-6 py-6 border transition duration-300 ${
-                                mode === "surah"
-                                  ? "bg-black text-white border-black shadow-overlay"
-                                  : "bg-white border-warm-200 hover:border-black/20"
-                              }`}
-                            >
-                              <span className="text-2xl" aria-hidden="true">📖</span>
-                              <span className="min-w-0">
-                                <span className="block text-lg font-bold">Choose a surah</span>
-                                <span
-                                  className={`block text-sm mt-0.5 ${
-                                    mode === "surah" ? "text-white/60" : "text-warm-400"
-                                  }`}
-                                >
-                                  Pick one and listen from the first verse to the last
-                                </span>
-                              </span>
-                            </button>
-                          </div>
-                        </>
-                      )}
+                    {mode === "surah" ? (
+                      <motion.div
+                        key="surah-picker"
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -12 }}
+                        transition={{ duration: 0.25, ease: "easeOut" }}
+                        className="space-y-4"
+                      >
+                        <div className="flex items-center gap-2 text-warm-400">
+                          <Bi name="chevron-right" size={14} />
+                          <label className="text-xs font-mono uppercase tracking-widest">
+                            Which surah?
+                          </label>
+                        </div>
+                        <div className="relative">
+                          <select
+                            value={selectedSurah}
+                            onChange={(e) => setSelectedSurah(Number(e.target.value))}
+                            className="w-full appearance-none bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-bold focus:outline-none focus:ring-2 focus:ring-black/10 cursor-pointer"
+                          >
+                            {chapters.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.id}. {c.name_simple} ({c.name_arabic})
+                              </option>
+                            ))}
+                          </select>
+                          <Bi
+                            name="chevron-right"
+                            size={18}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-warm-400 rotate-90 pointer-events-none"
+                          />
+                        </div>
 
-                      {currentSetupStep === "duration" && (
-                        <>
-                          <h3 className="font-resolide text-3xl md:text-5xl font-bold tracking-tight leading-tight">
-                            How long <br /> do you have?
-                          </h3>
-                          <div className="space-y-2">
-                            <div className="flex gap-2">
-                              {DURATIONS.map((d) => (
-                                <button
-                                  key={d.value}
-                                  onClick={() => {
-                                    setTargetDuration(d.value);
-                                    setCustomMinutes("");
-                                    goNextStepDelayed();
-                                  }}
-                                  className={`relative flex-1 py-6 rounded-2xl text-lg font-bold transition duration-300 border ${
-                                    targetDuration === d.value && !customMinutes
-                                      ? "bg-black text-white border-black shadow-overlay"
-                                      : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
-                                  }`}
-                                >
-                                  {d.label}
-                                </button>
-                              ))}
-                            </div>
-                            <div
-                              className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition duration-300 ${
-                                customMinutes
-                                  ? "bg-black border-black shadow-overlay"
-                                  : "bg-white border-warm-200 hover:border-black/20"
+                        <div className="pt-4">
+                          <button
+                            onClick={() => setSurahTimerEnabled(!surahTimerEnabled)}
+                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors"
+                          >
+                            <span
+                              className={`w-8 h-5 rounded-full relative transition-colors ${
+                                surahTimerEnabled ? "bg-black" : "bg-warm-200"
                               }`}
                             >
-                              <input
-                                type="number"
-                                min="1"
-                                max="120"
-                                placeholder="Custom duration"
-                                value={customMinutes}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setCustomMinutes(val);
-                                  if (val && Number(val) > 0) {
-                                    setTargetDuration(Number(val) * 60);
-                                  }
-                                }}
-                                className={`flex-1 bg-transparent outline-none text-lg font-bold placeholder:font-normal ${
-                                  customMinutes
-                                    ? "text-white placeholder:text-white/40"
-                                    : "text-warm-700 placeholder:text-warm-400"
-                                }`}
-                              />
                               <span
-                                className={`text-sm font-bold uppercase tracking-widest ${
-                                  customMinutes ? "text-white/50" : "text-warm-400"
-                                }`}
-                              >
-                                min
-                              </span>
-                            </div>
-                            {customMinutes && Number(customMinutes) > 0 && (
-                              <button
-                                onClick={goNextStep}
-                                className="w-full bg-black text-white rounded-2xl py-4 text-base font-bold mt-2 hover:scale-[1.01] active:scale-[0.99] transition"
-                              >
-                                Continue →
-                              </button>
-                            )}
-                          </div>
-                        </>
-                      )}
+                                className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
+                                style={{
+                                  transform: surahTimerEnabled ? "translateX(13px)" : "translateX(0)",
+                                  transition: "transform 180ms ease-out",
+                                  willChange: "transform",
+                                }}
+                              />
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <Bi name="clock" size={12} />
+                              Add timer
+                            </span>
+                          </button>
+                        </div>
 
-                      {currentSetupStep === "mood" && (
-                        <>
-                          <h3 className="font-resolide text-3xl md:text-5xl font-bold tracking-tight leading-tight">
-                            How's your heart <br /> right now?
-                          </h3>
+                        <AnimatePresence>
+                          {surahTimerEnabled && (
+                            <motion.div
+                              initial={{ opacity: 0, y: -8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -8 }}
+                              transition={{ duration: 0.25, ease: "easeOut" }}
+                              className="overflow-hidden"
+                            >
+                              <div className="space-y-2 pt-4">
+                                <div className="flex gap-2">
+                                  {DURATIONS.map((d) => (
+                                    <button
+                                      key={d.value}
+                                      onClick={() => {
+                                        setTargetDuration(d.value);
+                                        setCustomMinutes("");
+                                      }}
+                                      className={`relative flex-1 py-4 rounded-2xl text-lg font-bold transition duration-300 border ${
+                                        targetDuration === d.value && !customMinutes
+                                          ? "bg-black text-white border-black shadow-overlay"
+                                          : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
+                                      }`}
+                                    >
+                                      {d.label}
+                                    </button>
+                                  ))}
+                                </div>
+                                <div
+                                  className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition duration-300 ${
+                                    customMinutes
+                                      ? "bg-black border-black shadow-overlay"
+                                      : "bg-white border-warm-200 hover:border-black/20"
+                                  }`}
+                                >
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="120"
+                                    placeholder="Custom duration"
+                                    value={customMinutes}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setCustomMinutes(val);
+                                      if (val && Number(val) > 0) {
+                                        setTargetDuration(Number(val) * 60);
+                                      }
+                                    }}
+                                    className={`flex-1 bg-transparent outline-none text-lg font-bold placeholder:font-normal ${
+                                      customMinutes
+                                        ? "text-white placeholder:text-white/40"
+                                        : "text-warm-700 placeholder:text-warm-400"
+                                    }`}
+                                  />
+                                  <span
+                                    className={`text-sm font-bold uppercase tracking-widest ${
+                                      customMinutes ? "text-white/50" : "text-warm-400"
+                                    }`}
+                                  >
+                                    min
+                                  </span>
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        <div className="pt-2">
+                          <button
+                            onClick={() => setMemorizationEnabled(!memorizationEnabled)}
+                            className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors"
+                          >
+                            <span
+                              className={`w-8 h-5 rounded-full relative transition-colors ${
+                                memorizationEnabled ? "bg-black" : "bg-warm-200"
+                              }`}
+                            >
+                              <span
+                                className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
+                                style={{
+                                  transform: memorizationEnabled ? "translateX(13px)" : "translateX(0)",
+                                  transition: "transform 180ms ease-out",
+                                  willChange: "transform",
+                                }}
+                              />
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <Bi name="hearts" size={12} />
+                              Memorization mode
+                            </span>
+                          </button>
+                        </div>
+
+                        <AnimatePresence>
+                          {memorizationEnabled && (() => {
+                            const versesCount =
+                              chapters.find((c) => c.id === selectedSurah)?.verses_count || 1;
+                            const clamp = (n) => Math.min(Math.max(1, Number(n) || 1), versesCount);
+                            return (
+                              <motion.div
+                                initial={{ opacity: 0, y: -8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -8 }}
+                                transition={{ duration: 0.25, ease: "easeOut" }}
+                                className="overflow-hidden"
+                              >
+                                <div className="space-y-3 pt-4">
+                                  <div className="flex gap-2">
+                                    <div className="flex-1 bg-white border border-warm-200 rounded-2xl px-5 py-3">
+                                      <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400 mb-1">
+                                        Start verse
+                                      </p>
+                                      <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        pattern="[0-9]*"
+                                        value={memStartVerse}
+                                        onFocus={(e) => {
+                                          const el = e.currentTarget;
+                                          setTimeout(() => el.select(), 0);
+                                        }}
+                                        onChange={(e) => {
+                                          const raw = e.target.value.replace(/\D/g, "");
+                                          if (raw === "") { setMemStartVerse(""); return; }
+                                          const v = clamp(raw);
+                                          setMemStartVerse(v);
+                                          if (v > Number(memEndVerse)) setMemEndVerse(v);
+                                        }}
+                                        onBlur={() => {
+                                          if (!memStartVerse || Number(memStartVerse) < 1) setMemStartVerse(1);
+                                        }}
+                                        className="w-full bg-transparent outline-none text-lg font-bold text-warm-700"
+                                      />
+                                      <p className="text-[10px] text-warm-400 mt-1">Max: {versesCount}</p>
+                                    </div>
+                                    <div className="flex-1 bg-white border border-warm-200 rounded-2xl px-5 py-3">
+                                      <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400 mb-1">
+                                        End verse
+                                      </p>
+                                      <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        pattern="[0-9]*"
+                                        value={memEndVerse}
+                                        onFocus={(e) => {
+                                          const el = e.currentTarget;
+                                          setTimeout(() => el.select(), 0);
+                                        }}
+                                        onChange={(e) => {
+                                          const raw = e.target.value.replace(/\D/g, "");
+                                          if (raw === "") { setMemEndVerse(""); return; }
+                                          setMemEndVerse(clamp(raw));
+                                        }}
+                                        onBlur={() => {
+                                          const n = Number(memEndVerse);
+                                          if (!memEndVerse || n < Number(memStartVerse)) setMemEndVerse(Number(memStartVerse));
+                                        }}
+                                        className="w-full bg-transparent outline-none text-lg font-bold text-warm-700"
+                                      />
+                                      <p className="text-[10px] text-warm-400 mt-1">Max: {versesCount}</p>
+                                    </div>
+                                  </div>
+                                  <p className="text-[11px] text-warm-400 leading-snug">
+                                    Loops or stops at verse {memEndVerse} based on the toggle below.
+                                  </p>
+                                  <button
+                                    onClick={() => setMemRepeat(!memRepeat)}
+                                    className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors pt-1"
+                                  >
+                                    <span
+                                      className={`w-8 h-5 rounded-full relative transition-colors ${
+                                        memRepeat ? "bg-black" : "bg-warm-200"
+                                      }`}
+                                    >
+                                      <span
+                                        className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
+                                        style={{
+                                          transform: memRepeat ? "translateX(13px)" : "translateX(0)",
+                                          transition: "transform 180ms ease-out",
+                                          willChange: "transform",
+                                        }}
+                                      />
+                                    </span>
+                                    <span>Play on repeat</span>
+                                  </button>
+                                </div>
+                              </motion.div>
+                            );
+                          })()}
+                        </AnimatePresence>
+                      </motion.div>
+                    ) : mode === "juz" ? (
+                      <motion.div
+                        key="juz-picker"
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -12 }}
+                        transition={{ duration: 0.25, ease: "easeOut" }}
+                        className="space-y-4"
+                      >
+                        <div className="flex items-center gap-2 text-warm-400">
+                          <Bi name="chevron-right" size={14} />
+                          <label className="text-xs font-mono uppercase tracking-widest">
+                            Which juz?
+                          </label>
+                        </div>
+                        <div className="relative">
+                          <select
+                            value={selectedJuz}
+                            onChange={(e) => setSelectedJuz(Number(e.target.value))}
+                            className="w-full appearance-none bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-bold focus:outline-none focus:ring-2 focus:ring-black/10 cursor-pointer"
+                          >
+                            {JUZ.map((j, i) => {
+                              const startName =
+                                chapters.find((c) => c.id === j.start[0])?.name_simple || "";
+                              return (
+                                <option key={i + 1} value={i + 1}>
+                                  Juz {i + 1} — {startName} {j.start[0]}:{j.start[1]}
+                                </option>
+                              );
+                            })}
+                          </select>
+                          <Bi
+                            name="chevron-right"
+                            size={18}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-warm-400 rotate-90 pointer-events-none"
+                          />
+                        </div>
+                        <p className="text-[11px] text-warm-400 leading-snug">
+                          Plays the full juz, surah by surah, from beginning to end.
+                        </p>
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key="duration-picker"
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -12 }}
+                        transition={{ duration: 0.25, ease: "easeOut" }}
+                        className="space-y-4"
+                      >
+                        <div className="flex items-center gap-2 text-warm-400">
+                          <Bi name="clock" size={14} />
+                          <label className="text-xs font-mono uppercase tracking-widest">
+                            How long?
+                          </label>
+                        </div>
+                        <div className="flex gap-2">
+                          {DURATIONS.map((d) => (
+                            <button
+                              key={d.value}
+                              onClick={() => {
+                                setTargetDuration(d.value);
+                                setCustomMinutes("");
+                              }}
+                              className={`relative flex-1 py-4 rounded-2xl text-lg font-bold transition duration-300 border ${
+                                targetDuration === d.value && !customMinutes
+                                  ? "bg-black text-white border-black shadow-overlay"
+                                  : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
+                              }`}
+                            >
+                              {d.label}
+                            </button>
+                          ))}
+                        </div>
+                        <div
+                          className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition duration-300 ${
+                            customMinutes
+                              ? "bg-black border-black shadow-overlay"
+                              : "bg-white border-warm-200 hover:border-black/20"
+                          }`}
+                        >
+                          <input
+                            type="number"
+                            min="1"
+                            max="120"
+                            placeholder="Custom duration"
+                            value={customMinutes}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setCustomMinutes(val);
+                              if (val && Number(val) > 0) {
+                                setTargetDuration(Number(val) * 60);
+                              }
+                            }}
+                            className={`flex-1 bg-transparent outline-none text-lg font-bold placeholder:font-normal ${
+                              customMinutes
+                                ? "text-white placeholder:text-white/40"
+                                : "text-warm-700 placeholder:text-warm-400"
+                            }`}
+                          />
+                          <span
+                            className={`text-sm font-bold uppercase tracking-widest ${
+                              customMinutes ? "text-white/50" : "text-warm-400"
+                            }`}
+                          >
+                            min
+                          </span>
+                        </div>
+
+                        {/* Mood section — always visible in random mode */}
+                        <div className="pt-2">
+                          <p className="text-xs font-mono uppercase tracking-widest text-warm-400 mb-3 flex items-center gap-2">
+                            <Bi name="hearts" size={12} />
+                            How's your heart right now?
+                          </p>
                           <div className="grid grid-cols-2 gap-2">
                             <button
-                              onClick={() => {
-                                setMoodEnabled(false);
-                                goNextStepDelayed(450);
-                              }}
-                              className={`flex items-center gap-2 py-4 px-4 rounded-2xl text-sm font-bold transition duration-300 border text-left ${
+                              onClick={() => setMoodEnabled(false)}
+                              className={`flex items-center gap-2 py-3 px-4 rounded-2xl text-sm font-bold transition duration-300 border text-left ${
                                 !moodEnabled
                                   ? "bg-black text-white border-black shadow-overlay"
                                   : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
@@ -1836,12 +2043,8 @@ export default function QuranProjectPage() {
                             {MOODS.map((m) => (
                               <button
                                 key={m.id}
-                                onClick={() => {
-                                  setMoodEnabled(true);
-                                  setSelectedMood(m.id);
-                                  goNextStepDelayed(450);
-                                }}
-                                className={`flex items-center gap-2 py-4 px-4 rounded-2xl text-sm font-bold transition duration-300 border text-left ${
+                                onClick={() => { setMoodEnabled(true); setSelectedMood(m.id); }}
+                                className={`flex items-center gap-2 py-3 px-4 rounded-2xl text-sm font-bold transition duration-300 border text-left ${
                                   moodEnabled && selectedMood === m.id
                                     ? "bg-black text-white border-black shadow-overlay"
                                     : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
@@ -1852,326 +2055,69 @@ export default function QuranProjectPage() {
                               </button>
                             ))}
                           </div>
-                        </>
-                      )}
-
-                      {currentSetupStep === "surah" && (
-                        <>
-                          <h3 className="font-resolide text-3xl md:text-5xl font-bold tracking-tight leading-tight">
-                            Which surah?
-                          </h3>
-                          <div className="space-y-4">
-                            <div className="relative">
-                              <select
-                                value={selectedSurah}
-                                onChange={(e) => setSelectedSurah(Number(e.target.value))}
-                                className="w-full appearance-none bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-bold focus:outline-none focus:ring-2 focus:ring-black/10 cursor-pointer"
-                              >
-                                {chapters.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.id}. {c.name_simple} ({c.name_arabic})
-                                  </option>
-                                ))}
-                              </select>
-                              <Bi
-                                name="chevron-right"
-                                size={18}
-                                className="absolute right-4 top-1/2 -translate-y-1/2 text-warm-400 rotate-90 pointer-events-none"
-                              />
-                            </div>
-
-                            {/* Optional timer toggle for surah mode */}
-                            <div className="pt-2">
-                              <button
-                                onClick={() => setSurahTimerEnabled(!surahTimerEnabled)}
-                                className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors"
-                              >
-                                <span
-                                  className={`w-8 h-5 rounded-full relative transition-colors ${
-                                    surahTimerEnabled ? "bg-black" : "bg-warm-200"
-                                  }`}
-                                >
-                                  <span
-                                    className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
-                                    style={{
-                                      transform: surahTimerEnabled ? "translateX(13px)" : "translateX(0)",
-                                      transition: "transform 180ms ease-out",
-                                      willChange: "transform",
-                                    }}
-                                  />
-                                </span>
-                                <span className="flex items-center gap-2">
-                                  <Bi name="clock" size={12} />
-                                  Add timer
-                                </span>
-                              </button>
-                            </div>
-
-                            <AnimatePresence>
-                              {surahTimerEnabled && (
-                                <motion.div
-                                  initial={{ opacity: 0, y: -8 }}
+                          <AnimatePresence>
+                            {moodEnabled && (() => {
+                              const mood = MOODS.find((mm) => mm.id === selectedMood);
+                              return mood ? (
+                                <motion.p
+                                  key={mood.id}
+                                  initial={{ opacity: 0, y: -6 }}
                                   animate={{ opacity: 1, y: 0 }}
-                                  exit={{ opacity: 0, y: -8 }}
-                                  transition={{ duration: 0.25, ease: "easeOut" }}
-                                  className="overflow-hidden"
+                                  exit={{ opacity: 0, y: -6 }}
+                                  transition={{ duration: 0.25 }}
+                                  className="mt-3 text-sm text-warm-500 italic leading-relaxed"
                                 >
-                                  <div className="space-y-2 pt-2">
-                                    <div className="flex gap-2">
-                                      {DURATIONS.map((d) => (
-                                        <button
-                                          key={d.value}
-                                          onClick={() => {
-                                            setTargetDuration(d.value);
-                                            setCustomMinutes("");
-                                          }}
-                                          className={`relative flex-1 py-4 rounded-2xl text-lg font-bold transition duration-300 border ${
-                                            targetDuration === d.value && !customMinutes
-                                              ? "bg-black text-white border-black shadow-overlay"
-                                              : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
-                                          }`}
-                                        >
-                                          {d.label}
-                                        </button>
-                                      ))}
-                                    </div>
-                                    <div
-                                      className={`mt-2 flex items-center gap-3 rounded-2xl px-5 py-4 border transition duration-300 ${
-                                        customMinutes
-                                          ? "bg-black border-black shadow-overlay"
-                                          : "bg-white border-warm-200 hover:border-black/20"
-                                      }`}
-                                    >
-                                      <input
-                                        type="number"
-                                        min="1"
-                                        max="120"
-                                        placeholder="Custom duration"
-                                        value={customMinutes}
-                                        onChange={(e) => {
-                                          const val = e.target.value;
-                                          setCustomMinutes(val);
-                                          if (val && Number(val) > 0) {
-                                            setTargetDuration(Number(val) * 60);
-                                          }
-                                        }}
-                                        className={`flex-1 bg-transparent outline-none text-lg font-bold placeholder:font-normal ${
-                                          customMinutes
-                                            ? "text-white placeholder:text-white/40"
-                                            : "text-warm-700 placeholder:text-warm-400"
-                                        }`}
-                                      />
-                                      <span
-                                        className={`text-sm font-bold uppercase tracking-widest ${
-                                          customMinutes ? "text-white/50" : "text-warm-400"
-                                        }`}
-                                      >
-                                        min
-                                      </span>
-                                    </div>
-                                  </div>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-
-                            {/* Memorization toggle */}
-                            <div className="pt-2">
-                              <button
-                                onClick={() => setMemorizationEnabled(!memorizationEnabled)}
-                                className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors"
-                              >
-                                <span
-                                  className={`w-8 h-5 rounded-full relative transition-colors ${
-                                    memorizationEnabled ? "bg-black" : "bg-warm-200"
-                                  }`}
-                                >
-                                  <span
-                                    className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
-                                    style={{
-                                      transform: memorizationEnabled ? "translateX(13px)" : "translateX(0)",
-                                      transition: "transform 180ms ease-out",
-                                      willChange: "transform",
-                                    }}
-                                  />
-                                </span>
-                                <span className="flex items-center gap-2">
-                                  <Bi name="hearts" size={12} />
-                                  Memorization mode
-                                </span>
-                              </button>
-                            </div>
-
-                            <AnimatePresence>
-                              {memorizationEnabled && (() => {
-                                const versesCount =
-                                  chapters.find((c) => c.id === selectedSurah)?.verses_count || 1;
-                                const clamp = (n) => Math.min(Math.max(1, Number(n) || 1), versesCount);
-                                return (
-                                  <motion.div
-                                    initial={{ opacity: 0, y: -8 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -8 }}
-                                    transition={{ duration: 0.25, ease: "easeOut" }}
-                                    className="overflow-hidden"
-                                  >
-                                    <div className="space-y-3 pt-2">
-                                      <div className="flex gap-2">
-                                        <div className="flex-1 bg-white border border-warm-200 rounded-2xl px-5 py-3">
-                                          <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400 mb-1">
-                                            Start verse
-                                          </p>
-                                          <input
-                                            type="text"
-                                            inputMode="numeric"
-                                            pattern="[0-9]*"
-                                            value={memStartVerse}
-                                            onFocus={(e) => {
-                                              const el = e.currentTarget;
-                                              setTimeout(() => el.select(), 0);
-                                            }}
-                                            onChange={(e) => {
-                                              const raw = e.target.value.replace(/\D/g, "");
-                                              if (raw === "") {
-                                                setMemStartVerse("");
-                                                return;
-                                              }
-                                              const v = clamp(raw);
-                                              setMemStartVerse(v);
-                                              if (v > Number(memEndVerse)) setMemEndVerse(v);
-                                            }}
-                                            onBlur={() => {
-                                              if (!memStartVerse || Number(memStartVerse) < 1) {
-                                                setMemStartVerse(1);
-                                              }
-                                            }}
-                                            className="w-full bg-transparent outline-none text-lg font-bold text-warm-700"
-                                          />
-                                          <p className="text-[10px] text-warm-400 mt-1">
-                                            Max: {versesCount}
-                                          </p>
-                                        </div>
-                                        <div className="flex-1 bg-white border border-warm-200 rounded-2xl px-5 py-3">
-                                          <p className="text-[10px] font-mono uppercase tracking-widest text-warm-400 mb-1">
-                                            End verse
-                                          </p>
-                                          <input
-                                            type="text"
-                                            inputMode="numeric"
-                                            pattern="[0-9]*"
-                                            value={memEndVerse}
-                                            onFocus={(e) => {
-                                              const el = e.currentTarget;
-                                              setTimeout(() => el.select(), 0);
-                                            }}
-                                            onChange={(e) => {
-                                              const raw = e.target.value.replace(/\D/g, "");
-                                              if (raw === "") {
-                                                setMemEndVerse("");
-                                                return;
-                                              }
-                                              const v = clamp(raw);
-                                              setMemEndVerse(v);
-                                            }}
-                                            onBlur={() => {
-                                              const n = Number(memEndVerse);
-                                              if (!memEndVerse || n < Number(memStartVerse)) {
-                                                setMemEndVerse(Number(memStartVerse));
-                                              }
-                                            }}
-                                            className="w-full bg-transparent outline-none text-lg font-bold text-warm-700"
-                                          />
-                                          <p className="text-[10px] text-warm-400 mt-1">
-                                            Max: {versesCount}
-                                          </p>
-                                        </div>
-                                      </div>
-                                      <p className="text-[11px] text-warm-400 leading-snug">
-                                        Loops or stops at verse {memEndVerse} based on the toggle below.
-                                      </p>
-
-                                      <button
-                                        onClick={() => setMemRepeat(!memRepeat)}
-                                        className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest text-warm-400 hover:text-black transition-colors pt-1"
-                                      >
-                                        <span
-                                          className={`w-8 h-5 rounded-full relative transition-colors ${
-                                            memRepeat ? "bg-black" : "bg-warm-200"
-                                          }`}
-                                        >
-                                          <span
-                                            className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full"
-                                            style={{
-                                              transform: memRepeat ? "translateX(13px)" : "translateX(0)",
-                                              transition: "transform 180ms ease-out",
-                                              willChange: "transform",
-                                            }}
-                                          />
-                                        </span>
-                                        <span>Play on repeat</span>
-                                      </button>
-                                    </div>
-                                  </motion.div>
-                                );
-                              })()}
-                            </AnimatePresence>
-
-                            <button
-                              onClick={goNextStep}
-                              className="w-full bg-black text-white rounded-2xl py-4 text-base font-bold hover:scale-[1.01] active:scale-[0.99] transition"
-                            >
-                              Continue →
-                            </button>
-                          </div>
-                        </>
-                      )}
-
-                      {currentSetupStep === "reciter" && (
-                        <>
-                          <h3 className="font-resolide text-3xl md:text-5xl font-bold tracking-tight leading-tight">
-                            Who recites <br /> for you?
-                          </h3>
-                          {mode === "random" && moodEnabled && (() => {
-                            const mood = MOODS.find((m) => m.id === selectedMood) || MOODS[0];
-                            return (
-                              <p className="text-sm text-warm-500 italic leading-relaxed">
-                                “{mood.promise}”{" "}
-                                <span className="not-italic text-warm-400">— Quran {mood.ref}</span>
-                              </p>
-                            );
-                          })()}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {RECITERS.map((r) => (
-                              <button
-                                key={r.id}
-                                onClick={() => setReciterId(r.id)}
-                                className={`py-3 px-4 rounded-2xl text-sm font-bold transition duration-300 border text-left ${
-                                  reciterId === r.id
-                                    ? "bg-black text-white border-black shadow-overlay"
-                                    : "bg-white text-warm-500 border-warm-200 hover:border-black/20"
-                                }`}
-                              >
-                                {r.name}
-                              </button>
-                            ))}
-                          </div>
-                          <button
-                            onClick={startPlayback}
-                            className="w-full bg-black text-white rounded-2xl py-6 text-xl font-bold shadow-dropdown hover:shadow-black/40 hover:-translate-y-0.5 active:translate-y-0 transition flex items-center justify-center gap-3 group"
-                          >
-                            Start Listening
-                            <Bi
-                              name="play-fill"
-                              size={22}
-                              className="group-hover:scale-110 transition-transform"
-                            />
-                          </button>
-                        </>
-                      )}
-                    </motion.div>
+                                  "{mood.promise}"{" "}
+                                  <span className="not-italic text-warm-400">— Quran {mood.ref}</span>
+                                </motion.p>
+                              ) : null;
+                            })()}
+                          </AnimatePresence>
+                        </div>
+                      </motion.div>
+                    )}
                   </AnimatePresence>
+
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-warm-400">
+                      <Bi name="globe" size={14} />
+                      <label className="text-xs font-mono uppercase tracking-widest">
+                        Who recites?
+                      </label>
+                    </div>
+                    <div className="relative">
+                      <select
+                        value={reciterId}
+                        onChange={(e) => setReciterId(Number(e.target.value))}
+                        className="w-full bg-white border border-warm-200 rounded-2xl px-6 py-5 text-lg font-medium appearance-none cursor-pointer focus:outline-none focus:ring-4 focus:ring-black/5 transition"
+                      >
+                        {RECITERS.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.name}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none text-warm-400">
+                        <Bi name="chevron-right" size={20} className="rotate-90" />
+                      </div>
+                    </div>
+                  </div>
                 </div>
+
+                <button
+                  onClick={startPlayback}
+                  className="w-full bg-black text-white rounded-2xl py-6 text-xl font-bold shadow-dropdown hover:shadow-black/40 hover:-translate-y-0.5 active:translate-y-0 transition flex items-center justify-center gap-3 group"
+                >
+                  Start Listening
+                  <Bi
+                    name="play-fill"
+                    size={22}
+                    className="group-hover:scale-110 transition-transform"
+                  />
+                </button>
               </motion.div>
             )}
+
 
             {view === "playing" && (
               <motion.div
