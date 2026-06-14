@@ -29,6 +29,7 @@ lerna-debug.log*
 
 # Testing
 coverage/
+.vitest/
 
 # React Router / Vite
 .react-router/

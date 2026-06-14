@@ -1711,7 +1711,7 @@ export default function QuranProjectPage() {
                 transition={{ duration: 0.2 }}
                 className="space-y-12"
               >
-                {/* Resume prompt — surfaces last bookmark within 24h.
+                {/* Resume prompt — surfaces last bookmark within 7 days.
                     One-tap to pick up where the listener left off. */}
                 <AnimatePresence>
                   {showResumePrompt && lastSession && (
